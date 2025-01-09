@@ -1,0 +1,53 @@
+actions:
+- id: load_dataset
+  status: done
+  type: load_dataset
+- id: global_tokenizer
+  path: tokenizer/
+  status: always
+  type: train_load_tokenizer
+  vocab_size: 32010
+- id: pre_tokenize_data_10
+  path: data/pre_tokenize_data/sample_10.bin
+  sample_size: 10
+  shuffle: true
+  status: pending
+  tokenizer: global_tokenizer
+  type: pre_tokenize_data
+- data_source: pre_tokenize_data_10
+  id: pre_trained_10
+  params:
+  - eval_interval: 1000
+  - log_interval: 1
+  - eval_iters: 1000
+  - eval_only: false
+  - always_save_checkpoint: true
+  - init_from: scratch
+  - batch_size: 1
+  - max_seq_len: 2048
+  - vocab_size: 32010
+  - dim: 2048
+  - n_layers: 32
+  - n_heads: 32
+  - n_kv_heads: 32
+  - multiple_of: 256
+  - dropout: 0.0
+  - gradient_accumulation_steps: 4
+  - learning_rate: 0.0005
+  - max_iters: 222784
+  - weight_decay: 0.1
+  - beta1: 0.9
+  - beta2: 0.95
+  - grad_clip: 1.0
+  - decay_lr: true
+  - warmup_iters: 1000
+  - lr_decay_iters: 222784
+  - min_lr: 0.0
+  - device: cuda
+  - dtype: bfloat16
+  - compile: true
+  path: model/pretrain_model
+  status: ignore
+  type: pre_train
+dataset: mysam/maajim
+name: maajim

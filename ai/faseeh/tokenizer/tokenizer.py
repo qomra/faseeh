@@ -17,10 +17,10 @@ class FaseehTokenizer(LlamaTokenizerFast):
         "<pad>":9,
         "<mask>":10
     }
-    def __init__(self, sentence_pieace_file_name,vocab_size, **kwargs):
+    def __init__(self, path,sentence_pieace_file_name,vocab_size, **kwargs):
         
         args = dict(tokenizer_file=sentence_pieace_file_name,
-            name_or_path=self.path,
+            name_or_path=path,
             unk_token="<unk>",
             unk_token_id=FaseehTokenizer.special_tokens_encoder["<unk>"],
             bos_token="<|begin_of_text|>",
@@ -34,7 +34,7 @@ class FaseehTokenizer(LlamaTokenizerFast):
         super().__init__(**args)
         
     @staticmethod
-    def train(vocab_size,dataset_iterator):
+    def train(path,vocab_size,dataset_iterator):
         # save the trainer into a temp file
         with tempfile.NamedTemporaryFile() as temp_file:
             tokenizer = SentencePieceBPETokenizer()
@@ -45,6 +45,6 @@ class FaseehTokenizer(LlamaTokenizerFast):
                 special_tokens= list(FaseehTokenizer.special_tokens_encoder.keys()))
             tokenizer.save_model(temp_file.name)
             # copy the temp file to the path
-            f_tokenizer =  FaseehTokenizer(temp_file.name,vocab_size)
+            f_tokenizer =  FaseehTokenizer(path,temp_file.name,vocab_size)
             # remove the temp file
             return f_tokenizer

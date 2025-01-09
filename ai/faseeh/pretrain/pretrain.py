@@ -3,13 +3,14 @@
 import os
 import math
 import time
-from contextlib import nullcontext
-from functools import partial
-
 import torch
 import logging
-from model import Transformer, ModelArgs
+from functools import partial
+from contextlib import nullcontext
+
 from .task import Task
+from .model import Transformer, ModelArgs
+
 
 
 
