@@ -1,6 +1,5 @@
 
 import os
-import json
 import numpy as np
 from tqdm import tqdm
 
@@ -23,42 +22,42 @@ class FaseehProject:
         self.action_ids = [a["id"] for a in self.configuration.get("actions",[])]
         self.actions = {a["id"]:a for a in self.configuration.get("actions",[])}
         self.current_action = 0
+        self.action_outputs = {}
 
     def _update_status(self,status):
         action_id = self.action_ids[self.current_action]
-        if self.actions[action_id]["status"] != "always":
+        NO_UPDATE = ["always","ignore","failed"]
+        if self.actions[action_id]["status"] not in NO_UPDATE:
             self.actions[action_id]["status"] = status
-        if status != "failed":
-            self.configuration["actions"][self.current_action]["status"] = status
     
-    def execute_next(self):
-        if self.current_action < len(self.actions):
-            action_id = self.action_ids[self.current_action]
-            action = self.actions[action_id]
-            if action["status"] == "done":
-                self.current_action += 1
-                logging.info(f"Skipping action {action_id} as it is already done")
-                return True
-            elif action["status"] == "ignore":
-                self.current_action += 1
-                logging.info(f"Skipping action {action_id} as it is ignored")
-                return True
-            
-            # get_action_function from action["type"]
-            action_function = getattr(self,action["type"])
-            # execute the action
-            success = action_function(**action)
-            # update status of the action
-            if success:
-                self._update_status("done")
-                self.current_action += 1
-                return True
-            else:
-                self._update_status("failed")
-                return False      
-        else:
-            logging.info("All actions executed")
+    def _assign_output(self,output):
+        action_id = self.action_ids[self.current_action]
+        logging.info(f"Assigning output to action {action_id}")
+        self.action_outputs[action_id] = output
+
+    def execute_current_action(self):
         
+        action_id = self.action_ids[self.current_action]
+        action = self.actions[action_id]
+        if action["status"] == "done":
+            logging.info(f"Skipping action {action_id} as it is already done")
+            return True
+        elif action["status"] == "ignore":
+            logging.info(f"Skipping action {action_id} as it is ignored")
+            return True
+        
+        # get_action_function from action["type"]
+        action_function = getattr(self,action["type"])
+        # execute the action
+        success = action_function(**action)
+        # update status of the action
+        if success:
+            self._update_status("done")
+            return True
+        else:
+            self._update_status("failed")
+            return False      
+      
     def load_dataset(self,**kwargs):
         if self.dataset is None:
             self.dataset = pull(self.dataset_name)["train"]
@@ -66,20 +65,19 @@ class FaseehProject:
             return True
             
     def train_load_tokenizer(self,vocab_size,path,**kwargs):
-        
+        path = full_or_augment(path,self.root_path)
         try:
-            if not os.path.exists(path):
+            if not os.path.exists(f"{path}/tokenizer.json"):
                 self.load_dataset()
                 tokenizer = FaseehTokenizer.train(path,vocab_size,self.dataset["content"])
-                # make sure the directory exists
-                os.makedirs(path,exist_ok=True)
+                # make sure the directory exists  
                 logging.info(f"Saving tokenizer to {path}")
-                path = full_or_augment(path,self.root_path)
                 tokenizer.save_pretrained(path)
             else:
-                tokenizer = FaseehTokenizer.from_pretrained(path)  
-            self.actions[self.current_action]["output"] = tokenizer
+                logging.info(f"Loading tokenizer from {path}")
+                tokenizer = FaseehTokenizer.from_pretrained(path,legacy=False)  
             self._update_status("done")
+            self._assign_output(tokenizer)
             return True    
         except Exception as e:
             logging.error(f"Failed to train/load tokenizer: {e}")
@@ -92,8 +90,9 @@ class FaseehProject:
                           sample_size=-1,
                           shuffle=True,
                           **kwargs):
+       
         path = full_or_augment(path,self.root_path)
-        if tokenizer not in self.actions:
+        if tokenizer not in self.action_outputs:
             logging.error(f"Tokenizer {tokenizer} not found")
             self._update_status("failed")
             return False
@@ -106,7 +105,7 @@ class FaseehProject:
             else:
                 dataset = self.dataset.select(range(sample_size))
         
-        tokenizer = self.actions[tokenizer]["output"]
+        tokenizer = self.action_outputs[tokenizer]
         try:
             for example in tqdm(dataset):
                 text = f"{example['root']}:{example['content']}"
@@ -124,12 +123,13 @@ class FaseehProject:
             with open(path, "wb") as f:
                 f.write(all_tokens.tobytes())
             # calculate the average sequence length (they are separated by BOS=1)
-            avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
+            avg_seq_len = all_tokens.size / ((all_tokens == tokenizer.bos_token_id).sum())
             logging.info(f"Saved {path}, average seqlen: {avg_seq_len:.2f}")
 
             logging.info("Done.")
             self._update_status("done")
-            self.actions[self.current_action]["output"] = path
+            self._assign_output(path)
+            
             return True
         except:
             self._update_status("failed")
@@ -147,13 +147,15 @@ class FaseehProject:
         pretrainer.train(data_source)
 
     def execute(self):
+        self.current_action = 0
         while self.current_action < len(self.actions):
             logging.info(f"Executing action {self.action_ids[self.current_action]}")
-            status = self.execute_next()
+            status = self.execute_current_action()
             if not status:
                 logging.error(f"Failed to execute action {self.current_action}")
                 break
             # update current yaml file
             save_yaml(self.configuration,self.config_path)
+            self.current_action += 1
         
         

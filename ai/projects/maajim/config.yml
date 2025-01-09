@@ -1,6 +1,6 @@
 actions:
 - id: load_dataset
-  status: done
+  status: always
   type: load_dataset
 - id: global_tokenizer
   path: tokenizer/
@@ -11,7 +11,7 @@ actions:
   path: data/pre_tokenize_data/sample_10.bin
   sample_size: 10
   shuffle: true
-  status: pending
+  status: done
   tokenizer: global_tokenizer
   type: pre_tokenize_data
 - data_source: pre_tokenize_data_10
@@ -43,7 +43,7 @@ actions:
   - warmup_iters: 1000
   - lr_decay_iters: 222784
   - min_lr: 0.0
-  - device: cuda
+  - device: cuda:1
   - dtype: bfloat16
   - compile: true
   path: model/pretrain_model
