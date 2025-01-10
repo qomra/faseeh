@@ -61,6 +61,7 @@ class Pretrainer:
         # fixing some hyperparams to sensible defaults
         self.lr_decay_iters = self.max_iters  # should be ~= max_iters per Chinchilla
         self.min_lr = 0.0  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
+        self.seed_offset = 0  # offset for random seed
 
     @property
     def config(self):
@@ -189,7 +190,7 @@ class Pretrainer:
         model.to(self.device)
 
         # initialize a GradScaler. If enabled=False scaler is a no-op
-        scaler = torch.cuda.amp.GradScaler(enabled=(self.dtype == "float16"))
+        scaler = torch.amp.GradScaler(enabled=(self.dtype == "float16"))
 
         # optimizer
         optimizer = model.configure_optimizers(self.weight_decay, self.learning_rate, (self.beta1, self.beta2), device_type)

@@ -1,0 +1,63 @@
+name: maajim
+dataset: mysam/maajim
+devices:
+- 1
+actions:
+# training tokenizer or loading it if trained
+- id: global_tokenizer
+  type: train_load_tokenizer
+  path: tokenizer/
+  vocab_size: 32010
+  status: always
+
+# sft-training on the model trained based on the 10 samples dataset
+- id: sft_config_10
+  type: sft
+  pretrained_model_ckpt: model/model_s_10/ckpt.pt
+  tokenizer_id: global_tokenizer
+  dataset_name: mysam/masael_chat
+  path: model/sft/sft_10
+
+  # this must match the pretraining in arch
+  llama_config:
+    # some params
+    mlp_bias: false
+    pretraining_tp: 1
+    attention_bias: false
+    initializer_range: 0.02
+
+    # tokenization
+    bos_token_id: 1
+    eos_token_id: 2
+    vocab_size: 32010
+
+    # architecture
+    head_dim: 48
+    hidden_size: 288
+    hidden_act: "silu"
+    rope_scaling:
+    num_hidden_layers: 6
+    intermediate_size: 768
+    num_attention_heads: 6
+    num_key_value_heads: 6
+    attention_dropout: 0.0
+    tie_word_embeddings: false
+    max_position_embeddings: 288
+
+  # this is sft config
+  sft_config:
+    seed: 42
+    max_steps: -1
+    save_strategy: no
+    num_train_epochs: 1
+    max_seq_length: 2048
+    save_total_limit:
+    learning_rate: 2.0e-05
+    logging_strategy: steps
+    lr_scheduler_type: cosine
+    output_dir: model/sft/sft_10
+    per_device_eval_batch_size: 1
+    per_device_train_batch_size: 1
+
+
+  status: done

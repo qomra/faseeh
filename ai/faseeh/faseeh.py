@@ -1,22 +1,23 @@
 
 import os
+import logging
 import numpy as np
 from tqdm import tqdm
-
-from .pretrain import Pretrainer
-from .tokenizer import FaseehTokenizer
-from .utils import load_yaml,save_yaml,full_or_augment
-
 from maknaz import pull
 
-import logging
+from .pretrain import Pretrainer
+from .sft import FaseehSFTTrainer
+from .tokenizer import FaseehTokenizer
+from .utils import load_yaml,save_yaml,full_or_augment
 
 class FaseehProject:
     def __init__(self,config_path):
         self.config_path = config_path  
         self.configuration = load_yaml(config_path)
         self.root_path  = os.path.dirname(os.path.abspath(config_path))
-
+        devices = self.configuration.get("devices",None)
+        if devices:
+            os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(d) for d in devices])
         self.dataset_name = self.configuration["dataset"]
         self.dataset = None
         self.action_ids = [a["id"] for a in self.configuration.get("actions",[])]
@@ -89,6 +90,7 @@ class FaseehProject:
                           tokenizer=None,
                           sample_size=-1,
                           shuffle=True,
+                          min_seq_len=-1,
                           **kwargs):
        
         path = full_or_augment(path,self.root_path)
@@ -99,22 +101,27 @@ class FaseehProject:
         
         all_tokens = []
         dataset = self.dataset
-        if sample_size > 0:
-            if shuffle:
-                dataset = self.dataset.shuffle(seed=42).select(range(sample_size))
-            else:
-                dataset = self.dataset.select(range(sample_size))
+
+        if shuffle:
+            dataset = self.dataset.shuffle(seed=42)
         
         tokenizer = self.action_outputs[tokenizer]
+        logging.info(f"Pre-tokenizing dataset with sample size {sample_size} and min_seq_len {min_seq_len}")
         try:
-            for example in tqdm(dataset):
+            for index, example in enumerate(tqdm(dataset)):
                 text = f"{example['root']}:{example['content']}"
                 text = text.strip()  # get rid of leading/trailing whitespace
                 tokens = tokenizer.encode(text, add_special_tokens=True)  # encode the text, use BOS
                 all_tokens.extend(tokens)
+
+                if min_seq_len > 0 and sample_size > 0 and len(all_tokens) > min_seq_len and index > sample_size:
+                    logging.info(f"Reached min_seq_len {len(all_tokens)} > {min_seq_len} and sample_size {sample_size}")
+                    break
+
             
             # convert to uint16 nparray
             all_tokens = np.array(all_tokens, dtype=np.uint16)
+            logging.info(f"Pre-tokenized {len(all_tokens)} tokens")
 
             # create the directory if it does not exist
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -141,11 +148,46 @@ class FaseehProject:
                  data_source,
                  **kwargs):
         path = full_or_augment(path,self.root_path)
-        data_source = full_or_augment(self.actions[data_source]["output"],self.root_path)
-        params["vocab_source"] = data_source
-        pretrainer = Pretrainer(path,**params)
+        data_source = full_or_augment(data_source,self.root_path)
+        
+        pretrainer = Pretrainer(path,vocab_source=data_source,**params)
         pretrainer.train(data_source)
+        return True
 
+    def sft(self,
+            dataset_name,
+            pretrained_model_ckpt,
+            llama_config,
+            sft_config,
+            tokenizer_id,
+            path,
+            **kwargs):
+        # load dataset
+        logging.info(f"Pulling sft dataset {dataset_name}")
+        dataset = pull(dataset_name)
+
+        # pretrained model path
+        pretrained_model_ckpt = full_or_augment(
+                pretrained_model_ckpt,
+                self.root_path)
+
+        # tokenizer 
+        tokenizer = self.action_outputs[tokenizer_id]
+
+        # sft-trainer 
+        sft_trainer = FaseehSFTTrainer(
+            sft_config,
+            llama_config,
+            tokenizer,
+            pretrained_model_ckpt,
+            path
+        )
+
+        # train
+        sft_trainer.train(dataset["train"])
+
+        return True
+        
     def execute(self):
         self.current_action = 0
         while self.current_action < len(self.actions):

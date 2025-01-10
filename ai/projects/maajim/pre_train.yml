@@ -1,0 +1,77 @@
+name: maajim
+dataset: mysam/maajim
+devices:
+- 1
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
+# training tokenizer or loading it if trained
+- id: global_tokenizer
+  type: train_load_tokenizer
+  path: tokenizer/
+  vocab_size: 32010
+  status: always
+
+# pre-tokenizing either 10 samples or 2048 tokens
+- id: pre_tokenize_data_10
+  type: pre_tokenize_data
+  path: data/sample_10/sample_10.bin
+  min_seq_len: 2048
+  sample_size: 10
+  shuffle: true
+  tokenizer: global_tokenizer
+  status: done
+
+# pre-training a model based on the 10 samples dataset
+- id: pre_trained_10
+  type: pretrain
+  data_source: data/sample_10/
+  path: model/model_s_10
+  params:
+    # Data settings
+    batch_size: 1
+    max_seq_len: 2048
+    vocab_size: 32010
+
+    # Optimizer settings
+    beta1: 0.9
+    beta2: 0.95
+    max_iters: 150
+    grad_clip: 1.0
+    weight_decay: 0.1
+    learning_rate: 0.0005
+    gradient_accumulation_steps: 4
+
+    # Learning rate schedule
+    decay_lr: true
+    warmup_iters: 3
+
+    # System settings
+    device: cuda
+    compile: true
+    dtype: bfloat16
+
+    # Model architecture
+    dim: 288
+    n_heads: 6
+    n_layers: 6
+    dropout: 0.0
+    n_kv_heads: 6
+    multiple_of: 32
+
+    # Training settings
+    eval_iters: 50
+    seed_offset: 0
+    log_interval: 1
+    eval_only: false
+    eval_interval: 50
+    init_from: scratch
+    always_save_checkpoint: true
+
+    # fixing some hyperparams to sensible defaults
+    min_lr: 0.0
+    lr_decay_iters: 10
+  status: done

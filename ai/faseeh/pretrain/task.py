@@ -4,6 +4,7 @@ Download, preprocess and serve the TinyStories dataset as a DataLoader.
 import os
 import glob
 import random
+import logging
 import numpy as np
 from typing import List
 
@@ -18,7 +19,7 @@ import torch.distributed as dist
 class PretokDataset(torch.utils.data.IterableDataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
-    def __init__(self, max_seq_len, data_source):
+    def __init__(self, max_seq_len, data_source,**kwargs):
         super().__init__()
         self.max_seq_len = max_seq_len
         self.data_source = data_source
@@ -32,7 +33,6 @@ class PretokDataset(torch.utils.data.IterableDataset):
         # combine the worker_id and worker_rank to create a unique seed for rng
         seed = 42 + worker_id + 1337 * rank
         rng = random.Random(seed)
-        print(f"Created a PretokDataset with rng seed {seed}")
         
         # the .bin files are in tok{N} directory
         shard_filenames = sorted(glob.glob(os.path.join(self.data_source, "*.bin"))) 

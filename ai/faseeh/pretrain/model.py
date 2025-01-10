@@ -1,13 +1,14 @@
 import math
-import struct
+import logging
 import inspect
 from dataclasses import dataclass
 from typing import Any, Optional, Tuple
 
-import numpy as np
+
 import torch
-import torch.nn.functional as F
 from torch import nn
+import torch.nn.functional as F
+
 
 @dataclass
 class ModelArgs:
@@ -285,14 +286,14 @@ class Transformer(nn.Module):
         ]
         num_decay_params = sum(p.numel() for p in decay_params)
         num_nodecay_params = sum(p.numel() for p in nodecay_params)
-        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        logging.info(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        logging.info(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
         # Create AdamW optimizer and use the fused version if it is available
         fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
         use_fused = fused_available and device_type == 'cuda'
         extra_args = dict(fused=True) if use_fused else dict()
         optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-        print(f"using fused AdamW: {use_fused}")
+        logging.info(f"using fused AdamW: {use_fused}")
 
         return optimizer
 
@@ -344,4 +345,18 @@ class Transformer(nn.Module):
 
         return idx
 
-    
+def load_pretrained_model(checkpoint):
+    device = "cuda:0" # stories260K is small enough to just breeze through it on CPU
+    checkpoint_dict = torch.load(checkpoint, map_location=device)
+    gptconf = ModelArgs(**checkpoint_dict['model_args'])
+    model = Transformer(gptconf)
+    state_dict = checkpoint_dict['model']
+    unwanted_prefix = '_orig_mod.'
+    for k,v in list(state_dict.items()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+    model.load_state_dict(state_dict, strict=False)
+    model.eval()
+    model.to(device)
+    return model
+ 
