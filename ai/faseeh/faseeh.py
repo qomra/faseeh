@@ -170,6 +170,10 @@ class FaseehProject:
         pretrained_model_ckpt = full_or_augment(
                 pretrained_model_ckpt,
                 self.root_path)
+        # sft model path
+        sft_model_path = full_or_augment(
+                path,
+                self.root_path)
 
         # tokenizer 
         tokenizer = self.action_outputs[tokenizer_id]
@@ -180,7 +184,7 @@ class FaseehProject:
             llama_config,
             tokenizer,
             pretrained_model_ckpt,
-            path
+            sft_model_path
         )
 
         # train
