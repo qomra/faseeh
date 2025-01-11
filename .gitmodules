@@ -1,0 +1,3 @@
+[submodule "frontend/chat-ui"]
+	path = frontend/chat-ui
+	url = https://github.com/huggingface/chat-ui
