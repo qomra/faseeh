@@ -4,8 +4,9 @@ import logging
 import numpy as np
 from tqdm import tqdm
 from maknaz import pull
+from transformers import AutoTokenizer
 
-from .pretrain import Pretrainer
+
 from .sft import FaseehSFTTrainer
 from .tokenizer import FaseehTokenizer
 from .utils import load_yaml,save_yaml,full_or_augment
@@ -67,6 +68,7 @@ class FaseehProject:
             
     def train_load_tokenizer(self,vocab_size,path,**kwargs):
         path = full_or_augment(path,self.root_path)
+        kinds = {"faseeh":FaseehTokenizer,"auto":AutoTokenizer}
         try:
             if not os.path.exists(f"{path}/tokenizer.json"):
                 self.load_dataset()
@@ -76,91 +78,99 @@ class FaseehProject:
                 tokenizer.save_pretrained(path)
             else:
                 logging.info(f"Loading tokenizer from {path}")
-                tokenizer = FaseehTokenizer.from_pretrained(path,legacy=False)  
-            self._update_status("done")
+                kind = kinds.get(kwargs.get("kind","faseeh"))
+                tokenizer = kind.from_pretrained(path,legacy=False)  
+                # use pad token as eos token
+                tokenizer.pad_token = tokenizer.eos_token
+                logging.info(f"Tokenizer model max length: {tokenizer.model_max_length}")
             self._assign_output(tokenizer)
             return True    
         except Exception as e:
             logging.error(f"Failed to train/load tokenizer: {e}")
-            self._update_status("failed")
             return False
         
     def pre_tokenize_data(self,
                           path=None,
-                          tokenizer=None,
+                          tokenizer_id=None,
                           sample_size=-1,
                           shuffle=True,
                           min_seq_len=-1,
+                          kind="faseeh",
                           **kwargs):
        
         path = full_or_augment(path,self.root_path)
-        if tokenizer not in self.action_outputs:
+        if tokenizer_id not in self.action_outputs:
             logging.error(f"Tokenizer {tokenizer} not found")
             self._update_status("failed")
             return False
         
-        all_tokens = []
+        
         dataset = self.dataset
 
         if shuffle:
             dataset = self.dataset.shuffle(seed=42)
         
-        tokenizer = self.action_outputs[tokenizer]
-        logging.info(f"Pre-tokenizing dataset with sample size {sample_size} and min_seq_len {min_seq_len}")
-        try:
-            for index, example in enumerate(tqdm(dataset)):
-                text = f"{example['root']}:{example['content']}"
-                text = text.strip()  # get rid of leading/trailing whitespace
-                tokens = tokenizer.encode(text, add_special_tokens=True)  # encode the text, use BOS
-                all_tokens.extend(tokens)
+        tokenizer = self.action_outputs[tokenizer_id]
+        if kind == "faseeh":
+            processed_dataset =  tokenizer.tokenize_dataset(dataset,path,sample_size,min_seq_len)
+            if processed_dataset is None:
+                logging.error(f"Failed to pre-tokenize dataset")
+                return False
+        else:
+            # check if .arrow file exists
+            if os.path.exists(f"{path}/dataset_info.json"):
+                # load dataset
+                from datasets import Dataset
+                logging.info(f"Loading pre-tokenized dataset from {path}")
+                processed_dataset = Dataset.load_from_disk(path)
+            else:
+                from .tokenizer.hf import pre_tokenize_dataset
+                block_size = kwargs.get("block_size",8192)
+                logging.info(f"Pre-tokenizing dataset with block size {block_size} {tokenizer.model_max_length}")
+                processed_dataset = pre_tokenize_dataset(dataset,tokenizer,sample_size,block_size)
+                if processed_dataset is None:
+                    logging.error(f"Failed to pre-tokenize dataset")
+                    return False
+                logging.info(f"Saving pre-tokenized dataset to {path}")
+                processed_dataset.save_to_disk(path)
 
-                if min_seq_len > 0 and sample_size > 0 and len(all_tokens) > min_seq_len and index > sample_size:
-                    logging.info(f"Reached min_seq_len {len(all_tokens)} > {min_seq_len} and sample_size {sample_size}")
-                    break
-
-            
-            # convert to uint16 nparray
-            all_tokens = np.array(all_tokens, dtype=np.uint16)
-            logging.info(f"Pre-tokenized {len(all_tokens)} tokens")
-
-            # create the directory if it does not exist
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
-            # write the bytes
-            with open(path, "wb") as f:
-                f.write(all_tokens.tobytes())
-            # calculate the average sequence length (they are separated by BOS=1)
-            avg_seq_len = all_tokens.size / ((all_tokens == tokenizer.bos_token_id).sum())
-            logging.info(f"Saved {path}, average seqlen: {avg_seq_len:.2f}")
-
-            logging.info("Done.")
-            self._update_status("done")
-            self._assign_output(path)
-            
-            return True
-        except:
-            self._update_status("failed")
-            return False
+        self._assign_output(processed_dataset)
+        return True
 
     def pretrain(self,
                  path,
-                 params,
-                 data_source,
+                 base_model_type="faseeh",
+                 base_model_name=None,
+                 data_source=None,
+                 params=None,
                  **kwargs):
         path = full_or_augment(path,self.root_path)
-        data_source = full_or_augment(data_source,self.root_path)
-        
-        pretrainer = Pretrainer(path,vocab_source=data_source,**params)
-        pretrainer.train(data_source)
+
+        if base_model_type == "faseeh":  
+            from .pretrain import Pretrainer  
+            data_source = full_or_augment(data_source,self.root_path)
+            pretrainer = Pretrainer(path,vocab_source=data_source,**params)
+            pretrainer.train(data_source)
+        elif base_model_type == "hf":
+            from .pretrain.pretrain_hf import Pretrainer
+            # load tokenizer
+            tokenizer = self.action_outputs.get(kwargs.get("tokenizer_id"),None)
+            if tokenizer is None:
+                logging.error(f"Tokenizer {tokenizer} not found")
+                return False
+            
+            pretrainer = Pretrainer(base_model_name,tokenizer,path)
+            pretrainer.train(self.dataset)
         return True
 
     def sft(self,
             dataset_name,
             pretrained_model_ckpt,
-            llama_config,
             sft_config,
             tokenizer_id,
             path,
+            llama_config=None,
+            sample_size=-1,
             **kwargs):
         # load dataset
         logging.info(f"Pulling sft dataset {dataset_name}")
@@ -174,17 +184,23 @@ class FaseehProject:
         sft_model_path = full_or_augment(
                 path,
                 self.root_path)
+        
+        # output dir must be passed to sft_config, although we write the model in a separate call
+        sft_config["output_dir"] = sft_model_path
 
         # tokenizer 
         tokenizer = self.action_outputs[tokenizer_id]
-
+        
+        pretrained_model_kind = kwargs.get("pretrained_model_kind","faseeh")
         # sft-trainer 
         sft_trainer = FaseehSFTTrainer(
             sft_config,
-            llama_config,
             tokenizer,
+            pretrained_model_kind,
             pretrained_model_ckpt,
-            sft_model_path
+            sft_model_path,
+            llama_config = llama_config,
+            sample_size = sample_size
         )
 
         # train

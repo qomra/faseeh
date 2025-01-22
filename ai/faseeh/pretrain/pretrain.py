@@ -63,6 +63,10 @@ class Pretrainer:
         self.min_lr = 0.0  # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
         self.seed_offset = 0  # offset for random seed
 
+        # print the configuration in pretty way
+        for k, v in self.config.items():
+            logging.info(f"{k}: {v}")
+
     @property
     def config(self):
         return {
@@ -202,7 +206,6 @@ class Pretrainer:
         # compile the model
         if compile:
             logging.info("compiling the model... (takes a ~minute)")
-            unoptimized_model = model
             model = torch.compile(model)  # requires PyTorch 2.0
 
         # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -249,9 +252,8 @@ class Pretrainer:
                 param_group["lr"] = lr
 
             # evaluate the loss on train/val sets and write checkpoints
-            
             losses = estimate_loss()
-            print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+
             if iter_num % self.eval_interval == 0:
                 if losses["val"] < best_val_loss or self.always_save_checkpoint:
                     best_val_loss = losses["val"]
@@ -269,7 +271,6 @@ class Pretrainer:
                     
             if iter_num == 0 and self.eval_only:
                 break
-
             # forward backward update, with optional gradient accumulation to simulate larger batch size
             # and using the GradScaler if data type is float16
             for micro_step in range(self.gradient_accumulation_steps):
