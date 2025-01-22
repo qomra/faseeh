@@ -207,7 +207,24 @@ class FaseehProject:
         sft_trainer.train(dataset["train"])
 
         return True
-        
+
+    def generate_chat_completion(self,
+                                 model_name,
+                                 file_name):
+        from .generator.hf import HuggingFaceWrapper
+        full_path = full_or_augment(file_name,self.root_path)
+        logging.info(f"Generating completions using model {model_name}")
+        model = HuggingFaceWrapper(model_name)
+        completions = model.generate(self.dataset)
+
+        # store completions into jsonl file
+        import json
+        logging.info(f"Saving completions to {full_path}")
+        with open(full_path,"w") as f:
+            for index,completion in enumerate(completions):
+                f.write(json.dumps({"index":index,"completion":completion}) + "\n")
+        return True
+
     def execute(self):
         self.current_action = 0
         while self.current_action < len(self.actions):
