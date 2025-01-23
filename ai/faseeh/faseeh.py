@@ -225,6 +225,45 @@ class FaseehProject:
                 f.write(json.dumps({"index":index,"completion":completion}) + "\n")
         return True
 
+    def train_reward_model(self,base_model,tokenizer_id,output_dir,batch_size=2,**kwargs):
+        from .rl import FaseehRewardTrainer
+        tokenizer = self.action_outputs[tokenizer_id]
+        full_output_dir = full_or_augment(output_dir,self.root_path)    
+        trainer = FaseehRewardTrainer(
+            tokenizer,
+            base_model,
+            full_output_dir,
+            batch_size=batch_size
+        )
+        # if kwargs contains dataset_id, load dataset
+        dataset_id = kwargs.get("dataset_id",None)
+        if dataset_id:
+            dataset = pull(dataset_id)
+            trainer.train(dataset["train"])
+        else:
+            trainer.train(self.dataset)
+        return True
+    
+    def train_policy_model(self,tokenizer_id,reward_model,ref_policy_model,policy_model,output_dir,**kwargs):
+        from .rl import FaseehRLTrainer
+        tokenizer = self.action_outputs[tokenizer_id]
+        full_output_dir = full_or_augment(output_dir,self.root_path)
+        trainer = FaseehRLTrainer(
+            tokenizer,
+            reward_model,
+            ref_policy_model,
+            policy_model,
+            full_output_dir
+        )
+        # if kwargs contains dataset_id, load dataset
+        dataset_id = kwargs.get("dataset_id",None)
+        if dataset_id:
+            dataset = pull(dataset_id)
+            trainer.train(dataset["train"])
+        else:
+            trainer.train(self.dataset)
+        return True
+
     def execute(self):
         self.current_action = 0
         while self.current_action < len(self.actions):
