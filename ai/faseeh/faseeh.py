@@ -210,7 +210,8 @@ class FaseehProject:
 
     def generate_chat_completion(self,
                                  model_name,
-                                 file_name):
+                                 file_name,
+                                 **kwargs):
         from .generator.hf import HuggingFaceWrapper
         full_path = full_or_augment(file_name,self.root_path)
         logging.info(f"Generating completions using model {model_name}")
@@ -220,9 +221,9 @@ class FaseehProject:
         # store completions into jsonl file
         import json
         logging.info(f"Saving completions to {full_path}")
-        with open(full_path,"w") as f:
+        with open(full_path,"w",encoding="utf-8") as f:
             for index,completion in enumerate(completions):
-                f.write(json.dumps({"index":index,"completion":completion}) + "\n")
+                f.write(json.dumps({"index":index,"completion":completion},indent=4,ensure_ascii=False) + "\n")
         return True
 
     def execute(self):

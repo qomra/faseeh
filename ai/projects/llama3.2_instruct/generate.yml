@@ -1,11 +1,16 @@
 name: tyf
-dataset: mysam/tyf
+dataset: mysam/tyf_short
 devices:
 - 1
 actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
 # training tokenizer or loading it if trained
 - id: llama_generator
   type: generate_chat_completion
-  model_name: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B/snapshots/4e20de362430cd3b72f300e6b0f18e50e7166e08
+  model_name: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/
   file_name: data/generation.jsonl
   status: always
