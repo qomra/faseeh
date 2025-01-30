@@ -1,0 +1,79 @@
+name: tyf
+dataset: mysam/tyf_short
+devices:
+- 0
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+- id: llama_generator_base
+  type: generate_chat_completion
+  model_name: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/tyf-1.0-1B/
+  file_name: data/generation_base.jsonl
+  status: done
+# - id: llama_generator_sigmoid
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_sigmoid/checkpoint-50/
+#   file_name: data/generation_sigmoid.jsonl
+#   status: always
+# - id: llama_generator_hinge
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_hinge/checkpoint-50/
+#   file_name: data/generation_hinge.jsonl
+#   status: always
+# - id: llama_generator_ipo
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_ipo/checkpoint-50/
+#   file_name: data/generation_ipo.jsonl
+#   status: always
+# - id: llama_generator_exo_pair
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_exo_pair/checkpoint-50/
+#   file_name: data/generation_exo_pair.jsonl
+#   status: always
+# - id: llama_generator_nca_pair
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_nca_pair/checkpoint-50/
+#   file_name: data/generation_nca_pair.jsonl
+#   status: always
+# - id: llama_generator_robust
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_robust/checkpoint-50/
+#   file_name: data/generation_robust.jsonl
+#   status: always
+# - id: llama_generator_bco_pair
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_bco_pair/checkpoint-50/
+#   file_name: data/generation_bco_pair.jsonl
+#   status: always
+- id: llama_generator_sppo_hard
+  type: generate_chat_completion
+  model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_sppo_hard/checkpoint-1200/
+  file_name: data/generation_sppo_hard.jsonl
+  status: always
+# - id: llama_generator_aot
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_aot/checkpoint-50/
+#   file_name: data/generation_aot.jsonl
+#   status: always
+# - id: llama_generator_aot_pair
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_aot_pair/checkpoint-50/
+#   file_name: data/generation_aot_pair.jsonl
+#   status: always
+# - id: llama_generator_discopop
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_discopop/checkpoint-50/
+#   file_name: data/generation_discopop.jsonl
+#   status: always
+# - id: llama_generator_apo_zero
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_apo_zero/checkpoint-50/
+#   file_name: data/generation_apo_zero.jsonl
+#   status: always
+# - id: llama_generator_apo_down
+#   type: generate_chat_completion
+#   model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf_apo_down/checkpoint-50/
+#   file_name: data/generation_apo_down.jsonl
+#   status: always

@@ -62,7 +62,6 @@ def formatting_prompts_func(example: Dict[str, Any]) -> List[str]:
             "<|eot_id|>"
         )
         output_texts.append(formatted_text)
-    
     return output_texts
 
 def get_instruction_template(tokenizer):

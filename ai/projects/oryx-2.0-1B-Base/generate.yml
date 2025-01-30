@@ -1,0 +1,25 @@
+name: tyf
+dataset: mkatib/kotob_small
+devices:
+- 0
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
+# training tokenizer or loading it if trained
+- id: global_tokenizer
+  type: train_load_tokenizer
+  path: tokenizer/
+  kind: auto
+  vocab_size: 32000
+  status: always
+
+# training tokenizer or loading it if trained
+- id: llama_generator
+  type: generate_pretrained_completion
+  model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/oryx-2.0-1B-Base/model/checkpoint-1143000/
+  file_name: data/generation_1143000.jsonl
+  tokenizer_id: global_tokenizer
+  status: always

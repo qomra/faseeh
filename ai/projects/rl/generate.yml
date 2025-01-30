@@ -1,0 +1,16 @@
+name: tyf
+dataset: mysam/tyf_short
+devices:
+- 0
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
+# training tokenizer or loading it if trained
+- id: llama_generator
+  type: generate_chat_completion
+  model_name: /home/jalalirs/Documents/code/arabi/faseeh/ai/projects/rl/model/policy/tyf/checkpoint-100/
+  file_name: data/generation.jsonl
+  status: always

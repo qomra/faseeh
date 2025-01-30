@@ -1,29 +1,44 @@
-name: tyf
-dataset: mysam/tyf
+name: tyf_rl
+dataset: mysam/tyf_rl
 devices:
 - 1
 actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
 # training tokenizer or loading it if trained
 - id: llama_tokenizer
   type: train_load_tokenizer
   kind: auto
-  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B/snapshots/4e20de362430cd3b72f300e6b0f18e50e7166e08
+  #path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/
   vocab_size: 128256
   status: always
 
-- id: llama_rl_reward
-  type: train_reward_model
-  base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B/snapshots/4e20de362430cd3b72f300e6b0f18e50e7166e08
-  tokenizer_id: llama_tokenizer
-  output_dir: model/reward/tyf
-  batch_size: 2
-  status: pending
+# - id: llama_rl_reward
+#   type: train_reward_model
+#   base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/
+#   tokenizer_id: llama_tokenizer
+#   output_dir: model/reward/tyf
+#   batch_size: 8
+#   status: pending
 
+# - id: policy_model
+#   type: train_policy_model
+#   reward_model: model/reward/tyf
+#   ref_policy_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/
+#   policy_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--Qwen--Qwen2.5-0.5B-Instruct/snapshots/7ae557604adf67be50417f59c2c2f167def9a775/
+#   tokenizer_id: llama_tokenizer
+#   output_dir: model/policy/tyf
+#   dataset_id: mysam/tyf_prompt
+#   status: ignore
+#   batch_size: 1
 - id: policy_model
-  type: train_policy_model
-  reward_model: model/reward/tyf
-  ref_policy_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B/snapshots/4e20de362430cd3b72f300e6b0f18e50e7166e08
-  policy_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B/snapshots/4e20de362430cd3b72f300e6b0f18e50e7166e08
+  type: train_dpo_model
+  #base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6/
+  base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/tyf-1.0-1B/
   tokenizer_id: llama_tokenizer
   output_dir: model/policy/tyf
   status: pending

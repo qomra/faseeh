@@ -27,14 +27,14 @@ class PretrainerConfig:
     seed: int = field(default=42)
     per_device_train_batch_size: int = field(default=2)
     gradient_accumulation_steps: int = field(default=1)
-    num_train_epochs: float = field(default=1.0)
+    num_train_epochs: float = field(default=6)
     learning_rate: float = field(default=2e-5)
     weight_decay: float = field(default=0.0)
     warmup_steps: int = field(default=0)
     logging_steps: int = field(default=500)
     save_steps: int = field(default=1000)
     save_total_limit: Optional[int] = field(default=2)
-    fp16: bool = field(default=False)
+    fp16: bool = field(default=True)
     torch_dtype: Optional[str] = field(default=None)
     use_flash_attention_2: bool = field(default=False)
     resume_from_checkpoint: bool = field(default=True)
@@ -187,8 +187,11 @@ class Pretrainer:
         set_seed(self.config.seed)
         
         # Preprocess dataset
-        train_dataset = self._preprocess_dataset(dataset)
-        
+        # check if preprocessed already
+        if "input_ids" not in dataset.column_names:
+            train_dataset = self._preprocess_dataset(dataset)
+        else:
+            train_dataset = dataset
         # Setup training arguments
         training_args = TrainingArguments(
             output_dir=self.config.output_dir,

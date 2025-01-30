@@ -60,12 +60,12 @@ class FaseehProject:
             self._update_status("failed")
             return False      
       
-    def load_dataset(self,**kwargs):
+    def load_dataset(self,split="train",**kwargs):
         if self.dataset is None:
-            self.dataset = pull(self.dataset_name)["train"]
+            self.dataset = pull(self.dataset_name)[split]
             self._update_status("done")
             return True
-            
+    
     def train_load_tokenizer(self,vocab_size,path,**kwargs):
         path = full_or_augment(path,self.root_path)
         kinds = {"faseeh":FaseehTokenizer,"auto":AutoTokenizer}
@@ -106,9 +106,6 @@ class FaseehProject:
         
         
         dataset = self.dataset
-
-        if shuffle:
-            dataset = self.dataset.shuffle(seed=42)
         
         tokenizer = self.action_outputs[tokenizer_id]
         if kind == "faseeh":
@@ -133,7 +130,10 @@ class FaseehProject:
                     return False
                 logging.info(f"Saving pre-tokenized dataset to {path}")
                 processed_dataset.save_to_disk(path)
-
+        if shuffle:
+            processed_dataset = processed_dataset.shuffle(seed=42)
+        
+        self.dataset = processed_dataset
         self._assign_output(processed_dataset)
         return True
 
@@ -164,18 +164,21 @@ class FaseehProject:
         return True
 
     def sft(self,
-            dataset_name,
+            
             pretrained_model_ckpt,
             sft_config,
             tokenizer_id,
             path,
             llama_config=None,
             sample_size=-1,
+            dataset_name=None,
             **kwargs):
         # load dataset
-        logging.info(f"Pulling sft dataset {dataset_name}")
-        dataset = pull(dataset_name)
-
+        if dataset_name is not None:
+            logging.info(f"Pulling sft dataset {dataset_name}")
+            dataset = pull(dataset_name)
+        else:
+            dataset = self.dataset  
         # pretrained model path
         pretrained_model_ckpt = full_or_augment(
                 pretrained_model_ckpt,
@@ -190,6 +193,7 @@ class FaseehProject:
 
         # tokenizer 
         tokenizer = self.action_outputs[tokenizer_id]
+        tokenizer.pad_token_id = 8 
         
         pretrained_model_kind = kwargs.get("pretrained_model_kind","faseeh")
         # sft-trainer 
@@ -204,19 +208,30 @@ class FaseehProject:
         )
 
         # train
-        sft_trainer.train(dataset["train"])
+        if "train" in dataset.column_names:
+            dataset = dataset["train"]
+     
+        sft_trainer.train(dataset)
 
         return True
 
     def generate_chat_completion(self,
                                  model_name,
                                  file_name,
+                                 max_new_tokens=200,
+                                 temprature=0.7,
+                                 top_k=50,
+                                 top_p=0.9,
                                  **kwargs):
         from .generator.hf import HuggingFaceWrapper
         full_path = full_or_augment(file_name,self.root_path)
         logging.info(f"Generating completions using model {model_name}")
         model = HuggingFaceWrapper(model_name)
-        completions = model.generate(self.dataset)
+        completions = model.generate(self.dataset,
+                                     max_new_tokens,
+                                     temprature,
+                                     top_k,
+                                     top_p)
 
         # store completions into jsonl file
         import json
@@ -225,6 +240,39 @@ class FaseehProject:
             for index,completion in enumerate(completions):
                 f.write(json.dumps({"index":index,"completion":completion},indent=4,ensure_ascii=False) + "\n")
         return True
+
+    def generate_pretrained_completion(self,
+                                        model_name,
+                                        file_name,
+                                        dataset_id=None,
+                                        max_new_tokens=100,
+                                        **kwargs):
+        from .generator.hf import HuggingFacePretrainedCompletionWrapper
+        full_path = full_or_augment(file_name,self.root_path)
+        logging.info(f"Generating completions using model {model_name}")
+        tokenizer = self.action_outputs.get(kwargs.get("tokenizer_id"),None)
+        model = HuggingFacePretrainedCompletionWrapper(model_name,tokenizer)
+        if dataset_id is None:
+            completions = model.generate(self.dataset,max_new_tokens)
+        else:
+            dataset = pull(dataset_id)
+            completions = model.generate(dataset,max_new_tokens)
+        # store completions into jsonl file
+        import json
+        logging.info(f"Saving completions to {full_path}")
+        with open(full_path,"w",encoding="utf-8") as f:
+            # check completion has 3 or 2 items
+            if len(completions[0]) == 3:
+                for index,(prompt,completion,ref) in enumerate(completions):
+                    final = f"{completion}"
+                    gt = f"{ref}"
+                    f.write(json.dumps({"index":index,"prompt":prompt,"completion":final,"ground_truth": gt},indent=4,ensure_ascii=False) + "\n")
+            else:
+                for index,(prompt,completion) in enumerate(completions):
+                    final = f"{prompt}\n\n{completion}"
+                    f.write(json.dumps({"index":index,"completion":final},indent=4,ensure_ascii=False) + "\n")
+        return True
+
 
     def train_reward_model(self,base_model,tokenizer_id,output_dir,batch_size=2,**kwargs):
         from .rl import FaseehRewardTrainer
@@ -249,11 +297,30 @@ class FaseehProject:
         from .rl import FaseehRLTrainer
         tokenizer = self.action_outputs[tokenizer_id]
         full_output_dir = full_or_augment(output_dir,self.root_path)
+        reward_model = full_or_augment(reward_model,self.root_path)
         trainer = FaseehRLTrainer(
             tokenizer,
             reward_model,
             ref_policy_model,
             policy_model,
+            full_output_dir
+        )
+        # if kwargs contains dataset_id, load dataset
+        dataset_id = kwargs.get("dataset_id",None)
+        if dataset_id:
+            dataset = pull(dataset_id)
+            trainer.train(dataset["train"])
+        else:
+            trainer.train(self.dataset)
+        return True
+
+    def train_dpo_model(self,tokenizer_id,base_model,output_dir,**kwargs):
+        from .rl import FaseehDPOTrainer
+        tokenizer = self.action_outputs[tokenizer_id]
+        full_output_dir = full_or_augment(output_dir,self.root_path)
+        trainer = FaseehDPOTrainer(
+            tokenizer,
+            base_model,
             full_output_dir
         )
         # if kwargs contains dataset_id, load dataset

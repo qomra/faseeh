@@ -46,6 +46,7 @@ class FaseehSFTTrainer:
             del pre_trained_model  # Remove the reference
             torch.cuda.empty_cache()  # Clear unused memory cache
         else:
+            logging.info("Loading pre-trained model")
             sft_model = AutoModelForCausalLM.from_pretrained(self.pretrain_model_ckpt)
 
         # Prepare data collator
@@ -60,7 +61,8 @@ class FaseehSFTTrainer:
             if isinstance(self.sample_size, float):
                 sample_size = int(len(dataset) * self.sample_size)
             logging.info(f"Sampling {sample_size} examples from the dataset")
-            dataset = dataset.shuffle(seed=42).select(range(sample_size))
+            # select last sample_size examples
+            dataset = dataset.select(range(len(dataset)-sample_size, len(dataset)))
         # Prepare SFT trainer
         trainer = SFTTrainer(
             sft_model,
@@ -68,7 +70,8 @@ class FaseehSFTTrainer:
             train_dataset=dataset,
             formatting_func=formatting_prompts_func,
             processing_class=self.tokenizer,
-            data_collator=data_collator
+            data_collator=data_collator,
+            
         )
 
         logging.info("Training the model...")
@@ -78,4 +81,4 @@ class FaseehSFTTrainer:
         logging.info("Saving the model...")
         # Save the model
         sft_model.save_pretrained(self.output_dir)
-        self.tokenizer.save_pretrained(self.output_dir)
+        #self.tokenizer.save_pretrained(self.output_dir)
