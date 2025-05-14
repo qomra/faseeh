@@ -5,7 +5,9 @@ import logging
 from typing import List, Dict, Any
 from trl import DPOConfig, DPOTrainer
 from transformers import AutoModelForCausalLM,AutoModelForSequenceClassification
-from trl import RewardConfig, RewardTrainer,RLOOConfig, RLOOTrainer, apply_chat_template
+from trl import RewardConfig, RewardTrainer,RLOOConfig, RLOOTrainer, GRPOConfig,GRPOTrainer, apply_chat_template
+
+from ..utils.rl import combined_lexical_reward
 
 class FaseehRewardTrainer:
     def __init__(self,
@@ -120,3 +122,51 @@ class FaseehDPOTrainer:
                 model=self.model, args=self.training_args, train_dataset=dataset, processing_class=self.tokenizer
             )
             trainer.train()
+
+
+def format_dataset(dataset):
+    dataset = dataset.map(lambda x: { # type: ignore
+        'prompt': [
+            {'role': 'user', 'content': x['question']}
+        ],
+        'answer': x['answer']
+    }) # type: ignore
+    return dataset # type: ignore
+
+
+def correctness_reward_func(prompts, completions, answer, **kwargs) -> list[float]:
+    responses = [completion[0]['content'] for completion in completions]
+    reward = [combined_lexical_reward(r,a) for r, a in zip(responses, answer)]
+    return reward
+    
+
+class FaseehGRPOTrainer:
+    def __init__(self,
+                 tokenizer,
+                 base_model,
+                 output_dir,
+                 **kwargs):
+        
+        self.tokenizer = tokenizer
+        self.output_dir = output_dir
+        self.model = AutoModelForCausalLM.from_pretrained(base_model)
+        self.training_args = GRPOConfig(output_dir=output_dir,
+                                        num_train_epochs=50,
+                                        save_steps=100,
+                                        save_total_limit=1,
+                                        logging_steps=10,
+                                        )
+
+    
+    def train(self, dataset):
+        logging.info("Training GRPO model...")
+        dataset = format_dataset(dataset)
+        trainer = GRPOTrainer(
+            model=self.model,
+            processing_class=self.tokenizer,
+            reward_funcs=[
+                correctness_reward_func],
+            args=self.training_args,
+            train_dataset=dataset,
+        )
+        trainer.train()

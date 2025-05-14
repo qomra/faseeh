@@ -27,7 +27,7 @@ class PretrainerConfig:
     seed: int = field(default=42)
     per_device_train_batch_size: int = field(default=2)
     gradient_accumulation_steps: int = field(default=1)
-    num_train_epochs: float = field(default=6)
+    num_train_epochs: float = field(default=1)
     learning_rate: float = field(default=2e-5)
     weight_decay: float = field(default=0.0)
     warmup_steps: int = field(default=0)
@@ -79,6 +79,7 @@ class Pretrainer:
         model_name_or_path: str,
         tokenizer,
         output_path: str,
+        num_train_epochs: float = 1,
         config: Optional[PretrainerConfig] = None
     ):
         self.model_name_or_path = model_name_or_path
@@ -87,6 +88,7 @@ class Pretrainer:
         self.config = config if config is not None else PretrainerConfig()
         # update output path
         self.config.output_dir = output_path
+        self.config.num_train_epochs = num_train_epochs
         
         # Setup logging
         logging.basicConfig(

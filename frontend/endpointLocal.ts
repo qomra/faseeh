@@ -29,7 +29,7 @@ export function endpointLocal(
         if (messagesOpenAI?.[0]) {
             messagesOpenAI[0].content = preprompt ?? "";
         }
-        var r = null;
+        let r: Response;
         if(preprompt?.startsWith("أنت روبوت ملخص")){
             console.log("Sending messages to local server with /summary endpoint");
             r = await fetch(`${url}/summary`, {

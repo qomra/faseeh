@@ -1,0 +1,58 @@
+name: maajim
+dataset: mysam/maajim_masael
+devices:
+- 1  # Use just one GPU with memory optimizations
+actions:
+
+#  loading the tokenizer
+- id: allam_tokenizer
+  type: train_load_tokenizer
+  kind: auto
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/ALLaM-7B-Instruct-preview
+  vocab_size: 64000
+  status: always
+
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  shuffle: true
+  status: always
+
+# sft-training with LoRA and memory optimizations
+- id: sft_training
+  type: sft
+  pretrained_model_kind: auto
+  pretrained_model_ckpt: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/ALLaM-7B-Instruct-preview
+  tokenizer_id: allam_tokenizer
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-Allam
+
+  # SFT config with memory optimizations
+  sft_config:
+    seed: 42
+    max_steps: -1
+    save_strategy: epoch
+    num_train_epochs: 5
+    max_seq_length: 8192  # Reduced from 8192
+    save_total_limit: 2
+    learning_rate: 5.0e-05
+    logging_strategy: steps
+    lr_scheduler_type: cosine
+    output_dir: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-Allam
+    per_device_eval_batch_size: 1
+    per_device_train_batch_size: 1
+    logging_steps: 10
+    gradient_accumulation_steps: 16  # Increased from 8
+    warmup_ratio: 0.05
+    evaluation_strategy: no
+    bf16: true  # Use bfloat16 mixed precision
+    optim: "paged_adamw_8bit"  # Memory-efficient 8-bit optimizer
+    gradient_checkpointing: true  # Trade computation for memory
+  # Use efficient LoRA configuration
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+    bias: "none"  # Don't train biases to save memory
+    task_type: "CAUSAL_LM"
+  status: always

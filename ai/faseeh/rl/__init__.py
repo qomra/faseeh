@@ -1,1 +1,1 @@
-from .rl import FaseehRewardTrainer, FaseehRLTrainer,FaseehDPOTrainer
+from .rl import FaseehRewardTrainer, FaseehRLTrainer,FaseehDPOTrainer, FaseehGRPOTrainer

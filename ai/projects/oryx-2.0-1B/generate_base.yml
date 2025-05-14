@@ -12,7 +12,7 @@ actions:
 # training tokenizer or loading it if trained
 - id: global_tokenizer
   type: train_load_tokenizer
-  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base-Maajim-4
   kind: auto
   vocab_size: 32000
   status: always

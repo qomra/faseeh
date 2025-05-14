@@ -1,0 +1,53 @@
+name: maajim
+dataset: mysam/maajim_masael
+devices:
+- 0
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  shuffle: true
+  status: always
+
+#  loading the tokenizer
+- id: llama_tokenizer
+  type: train_load_tokenizer
+  kind: auto
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base-Maajim-4
+  vocab_size: 32000
+  status: always
+
+# sft-training with LoRA
+- id: sft_training
+  type: sft
+  pretrained_model_kind: auto
+  pretrained_model_ckpt: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base-Maajim-4
+  tokenizer_id: llama_tokenizer
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Instruct-Maajim-4
+
+  # this is sft config
+  sft_config:
+    seed: 42
+    max_steps: -1
+    save_strategy: epoch
+    num_train_epochs: 5  # Reduced from 10
+    max_seq_length: 8192
+    save_total_limit: 2
+    learning_rate: 5.0e-07  # Reduced from 2.0e-06
+    logging_strategy: steps
+    lr_scheduler_type: cosine
+    output_dir: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Instruct-Maajim-4
+    per_device_eval_batch_size: 1
+    per_device_train_batch_size: 1
+    logging_steps: 10
+    gradient_accumulation_steps: 8  # Added to effectively increase batch size
+    warmup_ratio: 0.05  # Added warmup steps
+    evaluation_strategy: no  # Added evaluation during training
+  # Enable LoRA for parameter-efficient fine-tuning
+  lora_config:
+    r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: "all-linear"
+    task_type: "CAUSAL_LM"
+  status: always

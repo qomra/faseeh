@@ -1,30 +1,29 @@
 name: tyf
-dataset: mysam/maajim_completion
+dataset: mysam/masael_chat
 devices:
-- 1
+- 0
 actions:
 # loading full dataset
 - id: load_dataset
   type: load_dataset
-  split: test
+  split: train
   status: always
 
 # training tokenizer or loading it if trained
 - id: global_tokenizer
   type: train_load_tokenizer
-  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Instruct-Maajim-4
   kind: auto
   vocab_size: 32000
   status: always
 
 # training tokenizer or loading it if trained
 - id: llama_generator
-  type: generate_pretrained_completion
-  model_name: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base-Maajim-4
-  file_name: data/generation_base.jsonl
+  type: generate_chat_completion
+  model_name: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Instruct-Maajim-4
+  file_name: data/generation_maajim_4.jsonl
   tokenizer_id: global_tokenizer
   temprature: 0.01
   top_k: 50
   top_p: 0.9
-  max_new_tokens: 40
   status: always

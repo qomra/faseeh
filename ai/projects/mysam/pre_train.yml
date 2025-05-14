@@ -1,0 +1,18 @@
+name: mkatib
+dataset: mkatib/kotob
+devices:
+- 0
+actions:
+# loading full dataset
+# - id: load_dataset
+#   type: load_dataset
+#   status: always
+
+# training tokenizer or loading it if trained
+- id: global_tokenizer
+  type: train_load_tokenizer
+  path: tokenizer/
+  kind: auto
+  vocab_size: 32000
+  status: always
+

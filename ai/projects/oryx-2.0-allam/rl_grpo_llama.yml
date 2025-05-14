@@ -1,0 +1,31 @@
+name: ALLaM-7B-GRPO
+dataset: mysam/soal_w_jathr
+devices:
+- 0
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
+# training tokenizer or loading it if trained
+- id: llama_tokenizer
+  type: train_load_tokenizer
+  kind: auto
+  #path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/ALLaM-7B-Instruct-preview
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/meta-llama/Llama-3.1-8B-Instruct
+  # path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6
+  vocab_size: 128256
+  status: always
+
+
+- id: policy_model
+  experiment_id: llama-8b-grpo
+  type: train_grpo_model
+  trainer_type: llama
+  base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/meta-llama/Llama-3.1-8B-Instruct
+  #base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/models--meta-llama--Llama-3.2-1B-Instruct/snapshots/9213176726f574b556790deb65791e0c5aa438b6
+
+  tokenizer_id: llama_tokenizer
+  output_dir: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/Llama-8B-GRPO-2
+  status: always

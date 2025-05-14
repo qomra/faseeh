@@ -1,0 +1,25 @@
+name: oryx-2.0-1B-GRPO
+dataset: mysam/masael
+devices:
+- 1
+actions:
+# loading full dataset
+- id: load_dataset
+  type: load_dataset
+  status: always
+
+# training tokenizer or loading it if trained
+- id: llama_tokenizer
+  type: train_load_tokenizer
+  kind: auto
+  path: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base-Maajim-3
+  vocab_size: 32000
+  status: always
+
+
+- id: policy_model
+  type: train_grpo_model
+  base_model: /home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/mysam/oryx-2.0-1B-Base-Maajim-3
+  tokenizer_id: llama_tokenizer
+  output_dir: model/
+  status: always

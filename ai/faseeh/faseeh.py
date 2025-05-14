@@ -60,9 +60,11 @@ class FaseehProject:
             self._update_status("failed")
             return False      
       
-    def load_dataset(self,split="train",**kwargs):
+    def load_dataset(self,split="train",shuffle=False,**kwargs):
         if self.dataset is None:
             self.dataset = pull(self.dataset_name)[split]
+            if shuffle:
+                self.dataset = self.dataset.shuffle(seed=42)
             self._update_status("done")
             return True
     
@@ -70,7 +72,7 @@ class FaseehProject:
         path = full_or_augment(path,self.root_path)
         kinds = {"faseeh":FaseehTokenizer,"auto":AutoTokenizer}
         try:
-            if not os.path.exists(f"{path}/tokenizer.json"):
+            if not os.path.exists(f"{path}/tokenizer.json") and not os.path.exists(f"{path}/tokenizer.model"):
                 self.load_dataset()
                 tokenizer = FaseehTokenizer.train(path,vocab_size,self.dataset["content"])
                 # make sure the directory exists  
@@ -143,6 +145,7 @@ class FaseehProject:
                  base_model_name=None,
                  data_source=None,
                  params=None,
+                 num_train_epochs=1,
                  **kwargs):
         path = full_or_augment(path,self.root_path)
 
@@ -159,7 +162,7 @@ class FaseehProject:
                 logging.error(f"Tokenizer {tokenizer} not found")
                 return False
             
-            pretrainer = Pretrainer(base_model_name,tokenizer,path)
+            pretrainer = Pretrainer(base_model_name,tokenizer,path,num_train_epochs=num_train_epochs)
             pretrainer.train(self.dataset)
         return True
 
@@ -172,6 +175,7 @@ class FaseehProject:
             llama_config=None,
             sample_size=-1,
             dataset_name=None,
+            lora_config=None,
             **kwargs):
         # load dataset
         if dataset_name is not None:
@@ -204,7 +208,8 @@ class FaseehProject:
             pretrained_model_ckpt,
             sft_model_path,
             llama_config = llama_config,
-            sample_size = sample_size
+            sample_size = sample_size,
+            lora_config = lora_config
         )
 
         # train
@@ -218,6 +223,7 @@ class FaseehProject:
     def generate_chat_completion(self,
                                  model_name,
                                  file_name,
+                                 lora_adapter=None,
                                  max_new_tokens=200,
                                  temprature=0.7,
                                  top_k=50,
@@ -226,7 +232,7 @@ class FaseehProject:
         from .generator.hf import HuggingFaceWrapper
         full_path = full_or_augment(file_name,self.root_path)
         logging.info(f"Generating completions using model {model_name}")
-        model = HuggingFaceWrapper(model_name)
+        model = HuggingFaceWrapper(model_name,lora_adapter=lora_adapter)
         completions = model.generate(self.dataset,
                                      max_new_tokens,
                                      temprature,
@@ -273,7 +279,6 @@ class FaseehProject:
                     f.write(json.dumps({"index":index,"completion":final},indent=4,ensure_ascii=False) + "\n")
         return True
 
-
     def train_reward_model(self,base_model,tokenizer_id,output_dir,batch_size=2,**kwargs):
         from .rl import FaseehRewardTrainer
         tokenizer = self.action_outputs[tokenizer_id]
@@ -319,6 +324,31 @@ class FaseehProject:
         tokenizer = self.action_outputs[tokenizer_id]
         full_output_dir = full_or_augment(output_dir,self.root_path)
         trainer = FaseehDPOTrainer(
+            tokenizer,
+            base_model,
+            full_output_dir
+        )
+        # if kwargs contains dataset_id, load dataset
+        dataset_id = kwargs.get("dataset_id",None)
+        if dataset_id:
+            dataset = pull(dataset_id)
+            trainer.train(dataset["train"])
+        else:
+            trainer.train(self.dataset)
+        return True
+
+    def train_grpo_model(self,tokenizer_id,base_model,output_dir,**kwargs):
+        trainer_type =  kwargs.get("trainer_type","general") 
+        if trainer_type == "general":
+            from .rl import FaseehGRPOTrainer
+        elif trainer_type == "arabic":
+            from .rl.rl_ar import FaseehGRPOTrainer
+        elif trainer_type == "llama":
+            from .rl.rl_llama import FaseehGRPOTrainer
+        
+        tokenizer = self.action_outputs[tokenizer_id]
+        full_output_dir = full_or_augment(output_dir,self.root_path)
+        trainer = FaseehGRPOTrainer(
             tokenizer,
             base_model,
             full_output_dir
