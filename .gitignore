@@ -282,3 +282,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+ai/projects
+ai/datasets
+ai/rooter/*.json
+ai/rooter/*.html
+ai/rooter/models
