@@ -287,3 +287,8 @@ ai/datasets
 ai/rooter/*.json
 ai/rooter/*.html
 ai/rooter/modelsai/rooter/memorization_dataset.json
+*.safetensors
+checkpoint-*/
+runs/
+*.json
+ai/rooter/models/
