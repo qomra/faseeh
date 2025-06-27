@@ -1,27 +1,38 @@
-
-import logging
 import torch
-import re
-import json
-import os
-import gc
 import time
-import anthropic
-from transformers import AutoModelForCausalLM
-from trl import GRPOTrainer, GRPOConfig
-import pyarabic.araby as araby
-from peft import LoraConfig
-from peft import get_peft_model
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 import threading
-from typing import Optional, List, Dict, Any
-
-# Add these imports for robust networking
 import socket
 import signal
+import requests
+import regex as re
+import re
+import pyarabic.araby as araby
+import os
+import numpy as np
+import math
+import logging
+import json
+import gc
+import anthropic
+from urllib3.util.retry import Retry
+from typing import Optional, List, Dict, Any
+from trl import GRPOTrainer, GRPOConfig
+from transformers import AutoModelForCausalLM
+from requests.adapters import HTTPAdapter
+from peft import LoraConfig, get_peft_model, AutoPeftModelForCausalLM
+from peft import LoraConfig
+from peft import get_peft_model
+from Levenshtein import distance as lev
 from contextlib import contextmanager
+
+# This script direcory
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# rhyme2words cache file
+RHYME_FILE = os.path.join(SCRIPT_DIR, "rhyme2words.json")
+RHYME_INDEX = None
+# Anthropic API key from environment variable
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+
 
 class TimeoutException(Exception):
     pass
@@ -420,11 +431,180 @@ def enhanced_explicit_poetry_reward_func(prompts, completions, poem, **kwargs) -
     
     return rewards
 
-import logging
-import torch
-import math
-from transformers import AutoModelForCausalLM
-from peft import LoraConfig, get_peft_model, AutoPeftModelForCausalLM
+def last_cluster(word: str) -> str:
+    """
+    Return final consonant + long vowel/alif/ya + tanwin/sukun if present.
+    Very loose; good enough for reward shaping.
+    """
+    w = araby.strip_diacritics(word)
+    # remove tatweel and punctuation
+    w = re.sub(r"[ـ\W]+", "", w)
+    if len(w) <= 2:
+        return w
+    # find last consonant – very naïve
+    for i in range(len(w)-1, -1, -1):
+        if w[i] not in "aeiouى":
+            return w[i:]
+    return w[-2:]
+
+def rhyme_entropy(clusters):
+    """
+    0 → perfect single rhyme, ln(N) → all different.
+    We invert and normalise to [0,1].
+    """
+    from collections import Counter
+    cnt = Counter(clusters)
+    probs = np.array(list(cnt.values()), dtype=float) / len(clusters)
+    H = -(probs * np.log(probs)).sum()            # nats
+    if len(clusters) == 1:
+        return 1.0
+    return 1 - H / np.log(len(clusters))          # 1 = perfect, 0 = all diff.
+
+def smoother_rhyme_reward(prompts, completions, poem, **kw):
+    rewards = []
+    for compl, tgt in zip(completions, poem):
+        lines = [l.strip() for l in compl[0]["content"].split("\n") if l.strip()]
+        if len(lines) < 2:           # not a poem → reward 0
+            rewards.append(0.0)
+            continue
+
+        clusters = [last_cluster(line.split()[-1]) for line in lines]
+        ent_score = rhyme_entropy(clusters)           # 0–1
+
+        # soft closeness to gold rhyme (0 = identical, 1+ far)
+        tgt_cluster = last_cluster(tgt.split()[-1])
+        lev_dist = min(lev(c, tgt_cluster) for c in clusters)
+        gold_score = max(0.0, 1 - lev_dist / 3)       # taper after edit-3
+
+        # combine: 0.7 weight on internal consistency, 0.3 on gold match
+        reward = 0.7 * ent_score + 0.3 * gold_score
+        rewards.append(reward)
+    return rewards
+
+def _load_rhyme_index() -> Dict[str, List[str]]:
+    """Cache + return {rhyme_ending -> [valid words …]}"""
+    global RHYME_INDEX
+    if RHYME_INDEX is not None:
+        return RHYME_INDEX
+
+    if not os.path.isfile(RHYME_FILE):
+        logging.error("⚠️  rhyme index not found: %s", RHYME_FILE)
+        RHYME_INDEX = {}
+        return RHYME_INDEX
+
+    with open(RHYME_FILE, "r", encoding="utf-8") as f:
+        RHYME_INDEX = json.load(f)
+    logging.info("✅ loaded %d rhyme groups", len(RHYME_INDEX))
+    return RHYME_INDEX
+
+def _strip_diacritics(text: str) -> str:
+    """Loose, fast Arabic tashkeel/haraka stripping (no external dep)."""
+    return re.sub(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]", "", text)
+
+def _extract_target_rhyme(target: str) -> str:
+    """
+    Detect the rhyme of the reference poem:
+      – remove tashkeel
+      – take last up-to-3 chars of every non-empty line
+      – return the longest suffix that is identical across *all* lines,
+        else fall back to the longest suffix shared by 1st & 2nd line,
+        else the final character of line-1.
+    """
+    lines = [l.strip() for l in _strip_diacritics(target).split("\n") if l.strip()]
+    if len(lines) == 0:
+        return ""                       # should never happen
+    if len(lines) == 1:
+        return lines[0][-1]             # trivial case
+
+    def _common_suffix(a: str, b: str, k: int) -> str:
+        return a[-k:] if a[-k:] == b[-k:] else ""
+
+    # try length 3->2->1 across ALL lines
+    for k in (3, 2, 1):
+        suffix = lines[0][-k:]
+        if all(line.endswith(suffix) for line in lines):
+            return suffix
+
+    # otherwise try first two lines only
+    for k in (3, 2, 1):
+        sfx = _common_suffix(lines[0], lines[1], k)
+        if sfx:
+            return sfx
+
+    return lines[0][-1]
+
+def rhyme_dictionary_reward(
+    prompts, completions, poem, **kwargs
+) -> list[float]:
+    """
+    + detects the correct rhyme from *poem*         (ground truth)
+    + checks that ***every*** generated line ends with that rhyme
+    + checks that the last word of each line occurs in our lexicon
+    Returns a scalar in [0, 1] for each sample.
+    """
+    rhyme_index = _load_rhyme_index()
+    rewards: list[float] = []
+
+    for comp, reference in zip(completions, poem):
+        gen_text = comp[0]["content"].strip()
+        if not gen_text:
+            rewards.append(0.0)
+            continue
+
+        # ------------------------------------------------------------------ #
+        # Pre-processing
+        lines = [
+            l.strip() for l in _strip_diacritics(gen_text).split("\n") if l.strip()
+        ]
+        if len(lines) < 2:               # need at least a couplet
+            rewards.append(0.0)
+            continue
+
+        target_rhyme = _extract_target_rhyme(reference)
+        rhyme_len    = len(target_rhyme) if target_rhyme else 1
+
+        # ------------------------------------------------------------------ #
+        # Per-line checks
+        total          = len(lines)
+        rhyme_hits     = 0               # line ends with correct rhyme
+        lexicon_hits   = 0               # last word ∈ allowed list
+        endings        = []              # for self-consistency calc
+
+        for line in lines:
+            words = line.split()
+            if not words:
+                continue
+            last_word = words[-1]
+
+            endings.append(last_word[-rhyme_len:])
+
+            # 1) rhyme correctness
+            if last_word.endswith(target_rhyme):
+                rhyme_hits += 1
+
+            # 2) word in lexicon
+            if target_rhyme in rhyme_index and last_word in rhyme_index[target_rhyme]:
+                lexicon_hits += 1
+
+        # 3) rhyme consistency across the whole poem
+        most_common = max(set(endings), key=endings.count)
+        consistency = endings.count(most_common) / total
+
+        # ------------------------------------------------------------------ #
+        # Merge into a single reward  (all weights sum to 1.0)
+        w_rhyme       = 0.45         # uses correct ending
+        w_lexicon     = 0.40         # uses valid vocab
+        w_consistency = 0.15         # same ending everywhere
+
+        score = (
+            w_rhyme       * (rhyme_hits     / total) +
+            w_lexicon     * (lexicon_hits   / total) +
+            w_consistency * consistency
+        )
+
+        rewards.append(round(float(score), 4))
+
+    return rewards
 
 def setup_model_for_training(model_path_or_model, tokenizer, use_lora=True, from_lora_checkpoint=True):
     """
@@ -705,161 +885,6 @@ def setup_model_for_training(model_path_or_model, tokenizer, use_lora=True, from
     logging.info("✅ Model setup complete - ready for GRPO training")
     return model
 
-def aggressive_local_rhyme_reward(prompts, completions, poem, **kwargs) -> list[float]:
-    """Aggressive local rhyme detection with immediate positive feedback"""
-    rewards = []
-    
-    for completion, target_poem in zip(completions, poem):
-        text = completion[0]['content'].strip()
-        reward = 0.0
-        
-        # Extract lines
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        
-        if len(lines) >= 2:
-            reward += 0.3  # Base reward for structure
-            
-            # Extract target rhyme pattern
-            target_lines = [l.strip() for l in target_poem.split('\n') if l.strip()]
-            target_rhyme = None
-            if target_lines:
-                target_words = target_lines[0].split()
-                if target_words:
-                    target_last_word = araby.strip_diacritics(target_words[-1]) if hasattr(araby, 'strip_diacritics') else target_words[-1]
-                    target_rhyme = target_last_word[-2:] if len(target_last_word) >= 2 else target_last_word
-            
-            # Check generated lines for rhyme
-            gen_endings = []
-            for line in lines:
-                words = line.split()
-                if words:
-                    last_word = araby.strip_diacritics(words[-1]) if hasattr(araby, 'strip_diacritics') else words[-1]
-                    ending = last_word[-2:] if len(last_word) >= 2 else last_word
-                    gen_endings.append(ending)
-            
-            if len(gen_endings) >= 2:
-                # Reward ANY consistent rhyme pattern
-                most_common_ending = max(set(gen_endings), key=gen_endings.count)
-                rhyme_consistency = gen_endings.count(most_common_ending) / len(gen_endings)
-                
-                if rhyme_consistency >= 0.5:  # At least half lines rhyme
-                    reward += 0.4  # Big reward for any rhyme
-                    
-                    # HUGE bonus if it matches target rhyme
-                    if target_rhyme and most_common_ending == target_rhyme:
-                        reward += 0.5  # MASSIVE reward for correct rhyme
-                
-                # Even small rhyme attempts get rewarded
-                elif rhyme_consistency >= 0.33:
-                    reward += 0.2  # Smaller reward for partial rhyme
-        
-        rewards.append(min(1.0, reward))
-    
-    return rewards
-
-import numpy as np
-import regex as re
-from Levenshtein import distance as lev
-
-def last_cluster(word: str) -> str:
-    """
-    Return final consonant + long vowel/alif/ya + tanwin/sukun if present.
-    Very loose; good enough for reward shaping.
-    """
-    w = araby.strip_diacritics(word)
-    # remove tatweel and punctuation
-    w = re.sub(r"[ـ\W]+", "", w)
-    if len(w) <= 2:
-        return w
-    # find last consonant – very naïve
-    for i in range(len(w)-1, -1, -1):
-        if w[i] not in "aeiouى":
-            return w[i:]
-    return w[-2:]
-
-def rhyme_entropy(clusters):
-    """
-    0 → perfect single rhyme, ln(N) → all different.
-    We invert and normalise to [0,1].
-    """
-    from collections import Counter
-    cnt = Counter(clusters)
-    probs = np.array(list(cnt.values()), dtype=float) / len(clusters)
-    H = -(probs * np.log(probs)).sum()            # nats
-    if len(clusters) == 1:
-        return 1.0
-    return 1 - H / np.log(len(clusters))          # 1 = perfect, 0 = all diff.
-
-def smoother_rhyme_reward(prompts, completions, poem, **kw):
-    rewards = []
-    for compl, tgt in zip(completions, poem):
-        lines = [l.strip() for l in compl[0]["content"].split("\n") if l.strip()]
-        if len(lines) < 2:           # not a poem → reward 0
-            rewards.append(0.0)
-            continue
-
-        clusters = [last_cluster(line.split()[-1]) for line in lines]
-        ent_score = rhyme_entropy(clusters)           # 0–1
-
-        # soft closeness to gold rhyme (0 = identical, 1+ far)
-        tgt_cluster = last_cluster(tgt.split()[-1])
-        lev_dist = min(lev(c, tgt_cluster) for c in clusters)
-        gold_score = max(0.0, 1 - lev_dist / 3)       # taper after edit-3
-
-        # combine: 0.7 weight on internal consistency, 0.3 on gold match
-        reward = 0.7 * ent_score + 0.3 * gold_score
-        rewards.append(reward)
-    return rewards
-
-def log_detailed_sample(prompts, completions, poem, step_name=""):
-    """Log more detailed sample information"""
-    if completions and len(completions) > 0:
-        sample_completion = completions[0][0]['content']
-        sample_target = poem[0] if poem else "No target"
-        
-        logging.info(f"=" * 60)
-        logging.info(f"📝 {step_name} - SAMPLE POEM GENERATION")
-        logging.info(f"=" * 60)
-        
-        # Log prompt details
-        if prompts and len(prompts) > 0:
-            prompt = prompts[0]
-            if isinstance(prompt, list):
-                for i, msg in enumerate(prompt):
-                    if isinstance(msg, dict):
-                        logging.info(f"  📋 Prompt[{i}] ({msg.get('role', 'unknown')}): {msg.get('content', '')[:150]}...")
-            else:
-                logging.info(f"  📋 Prompt: {str(prompt)[:150]}...")
-        
-        # Log target vs generated
-        logging.info(f"  🎯 TARGET POEM:")
-        for i, line in enumerate(sample_target.split('\n')[:4]):
-            if line.strip():
-                logging.info(f"     {i+1}: {line.strip()}")
-        
-        logging.info(f"  🤖 GENERATED POEM:")
-        for i, line in enumerate(sample_completion.split('\n')[:4]):
-            if line.strip():
-                logging.info(f"     {i+1}: {line.strip()}")
-        
-        # Log statistics
-        gen_lines = [l.strip() for l in sample_completion.split('\n') if l.strip()]
-        target_lines = [l.strip() for l in sample_target.split('\n') if l.strip()]
-        
-        logging.info(f"  📊 STATS:")
-        logging.info(f"     Target lines: {len(target_lines)}, Generated lines: {len(gen_lines)}")
-        logging.info(f"     Generated length: {len(sample_completion)} chars, {len(sample_completion.split())} words")
-        logging.info(f"     Total generations this step: {len(completions)}")
-        logging.info(f"=" * 60)
-
-def zscore(scores, eps: float = 1e-8):
-    """
-    Batch-normalise a Python list of floats so that mean = 0, std = 1.
-    Keeps gradient signals alive when all raw rewards are clustered.
-    """
-    t = torch.tensor(scores, dtype=torch.float32)
-    return ((t - t.mean()) / (t.std() + eps)).tolist()
-
 step_counter = 0          # keep outside so all batches share it
 class FaseehPoetryGRPOTrainer:
 
@@ -960,103 +985,90 @@ class FaseehPoetryGRPOTrainer:
 
     def train(self, dataset):
 
-        import numpy as np, gc, logging, torch
-        from trl import GRPOTrainer
-
-        # ─────────── housekeeping ───────────
-        logging.info("▶️  GRPO poetry training starts")
+        ######################################################################
+        # 0.  house-keeping
+        ######################################################################
+        logging.info("▶️  GRPO poetry training (no Anthropic)…")
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        gc.collect()
 
-        online = robust_client and robust_client._check_internet_connection()
-        logging.info("✅ Anthropic online" if online else "⚠️  Offline – Claude calls disabled")
+        formatted_ds = self.format_dataset(dataset)
 
-        formatted = self.format_dataset(dataset)
+        trainable = sum(p.requires_grad for p in self.model.parameters())
+        if trainable == 0:
+            raise RuntimeError("⚠️  model has no trainable tensors")
+        logging.info(f"🔍 trainable tensors: {trainable}")
 
-        trainable_tensors = sum(p.requires_grad for p in self.model.parameters())
-        if trainable_tensors == 0:
-            raise RuntimeError("No trainable parameters, aborting.")
-        logging.info(f"🔍 Trainable tensors: {trainable_tensors}")
-
-        # ─────────── curriculum constants ───────────
-        PHASE_A_STEPS = 200          # purely-rhyme warm-up
+        ######################################################################
+        # 1.  curriculum constants
+        ######################################################################
+        PHASE_A_STEPS = 150         # warm-up on rhyme only
         WEIGHTS = {
-            "A": {"rhyme": 1.0},
-            "B": {"rhyme": 0.25, "claude": 0.40,
-                "structure": 0.15, "explicit": 0.20},
+            #          rhyme  struct  explicit
+            "A":   (1.0,   0.0,    0.0),
+            "B":   (0.6,   0.25,   0.15),
         }
 
-        # ─────────── helpers ───────────
-        def _zscore(lst, clip=2.5, eps=1e-8):
-            """safe z-score; if σ==0 returns zeros"""
-            arr = np.asarray(lst, dtype=np.float32)
-            std = arr.std()
+        def zscore(x, eps=1e-8, clip=3.0):
+            x = np.asarray(x, np.float32)
+            std = x.std()
             if std < eps:
-                return np.zeros_like(arr)
-            return np.clip((arr - arr.mean()) / (std + eps), -clip, clip).tolist()
+                return np.zeros_like(x)
+            return np.clip((x - x.mean()) / (std + eps), -clip, clip).tolist()
 
-        # track global optimisation step
+        ######################################################################
+        # 2.  wrapped reward
+        ######################################################################
         self.global_step = 0
 
-        def combined_reward(prompts, completions, poem, **kw):
-            """Curriculum-aware reward: rhyme only → mixed."""
+        def combined_reward(prompts, comps, targets, **kw):
+            """Phase-aware combination of local rewards."""
             self.global_step += 1
             phase = "A" if self.global_step < PHASE_A_STEPS else "B"
-            w = WEIGHTS[phase]
+            w_rhyme, w_struct, w_exp = WEIGHTS[phase]
 
-            # always compute rhyme – cheap & local
-            rhyme_raw = smoother_rhyme_reward(prompts, completions, poem, **kw)
-            rhyme = _zscore(rhyme_raw)
+            rhyme_raw   = rhyme_dictionary_reward(prompts, comps, targets)
+            rhyme_z     = zscore(rhyme_raw)
 
-            # during phase A we *skip* expensive calls
+            # light extras only after warm-up
             if phase == "A":
-                claude = struct = expl = [0.0] * len(rhyme)
+                struct_z = exp_z = [0.0]*len(rhyme_raw)
             else:
-                # claude_raw = claude_qafiya_weighted_reward_func_robust(
-                #     prompts, completions, poem, **kw
-                # )
-                struct_raw = structure_reward_func(prompts, completions, poem, **kw)
-                expl_raw   = enhanced_explicit_poetry_reward_func(
-                    prompts, completions, poem, **kw
-                )
-                # claude, struct, expl = map(_zscore,
-                #                         (claude_raw, struct_raw, expl_raw))
-                struct, expl = map(_zscore, (struct_raw, expl_raw))
+                struct_z = zscore(structure_reward_func(prompts, comps, targets))
+                exp_z    = zscore(enhanced_explicit_poetry_reward_func(
+                                    prompts, comps, targets))
 
             # linear mix
             rewards = [
-                w.get("rhyme", 0)   * r +
-                #w.get("claude", 0)  * c +
-                w.get("structure",0)* s +
-                w.get("explicit",0) * e
-                #for r, c, s, e in zip(rhyme, claude, struct, expl)
-                for r, s, e in zip(rhyme, struct, expl)
+                w_rhyme  * r +
+                w_struct * s +
+                w_exp    * e
+                for r, s, e in zip(rhyme_z, struct_z, exp_z)
             ]
 
-            # lightweight logging every 20 steps
             if self.global_step % 20 == 0:
                 logging.info(
-                    f"step={self.global_step:>5} "
-                    f"| phase={phase} "
-                    f"| μ_raw_rhyme={np.mean(rhyme_raw):.3f} "
-                    f"| μ_total={np.mean(rewards):.3f}"
+                    f"step={self.global_step:4d}│{phase}"
+                    f"│μ(rhyme_raw)={np.mean(rhyme_raw):.3f}"
+                    f"│μ(total)={np.mean(rewards):.3f}"
                 )
             return rewards
-
-        # ─────────── create & run trainer ───────────
+        ######################################################################
+        # 3.  create trainer and launch
+        ######################################################################
         trainer = GRPOTrainer(
             model            = self.model,
             reward_funcs     = [combined_reward],
             args             = self.training_args,
-            train_dataset    = formatted,
+            train_dataset    = formatted_ds,
             processing_class = self.tokenizer,
         )
 
-        logging.info("🚀  Entering GRPO optimisation loop …")
+        logging.info("🚀  starting optimisation loop …")
         try:
             trainer.train()
-            logging.info(f"🏁  Training complete – results saved to {self.output_dir}")
+            logging.info(f"✅ finished – model saved to {self.output_dir}")
         except Exception:
-            logging.exception("Training crashed!")
+            logging.exception("❌ training crashed")
             raise
