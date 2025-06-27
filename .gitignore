@@ -286,4 +286,4 @@ ai/projects
 ai/datasets
 ai/rooter/*.json
 ai/rooter/*.html
-ai/rooter/models
+ai/rooter/modelsai/rooter/memorization_dataset.json
