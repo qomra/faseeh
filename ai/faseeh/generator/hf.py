@@ -16,8 +16,24 @@ class StopOnTokens(StoppingCriteria):
                 return True
         return False
 
+# def formatting_prompts_func(conv):
+#     #system_prompt = "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+#     system_prompt = conv[0]['content'].strip() if conv and len(conv) > 0 else "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+#     formatted_text = (
+#         "<|begin_of_text|>"
+#         "<|header_start|>system<|header_end|>"
+#         f"{system_prompt}"
+#         "<|eot|>"
+#         "<|header_start|>user<|header_end|>"
+#         f"{conv[1]['content'].strip()}"
+#         "<|eot|>"
+#         "<|header_start|>assistant<|header_end|>"
+#     )
+#     return formatted_text
+
 def formatting_prompts_func(conv):
-    system_prompt = "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+    # system_prompt = "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+    system_prompt = conv[0]['content'].strip() if conv and len(conv) > 0 else "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
     formatted_text = (
         "<|begin_of_text|>"
         "<|start_header_id|>system<|end_header_id|>"
@@ -50,26 +66,30 @@ class HuggingFaceWrapper:
         # set padding side to left
         self.model.tokenizer.padding_side = "left"
         self.stop_token_ids = [
-            self.tokenizer.encode("<|eot_id|>", add_special_tokens=False)[0],
-            self.tokenizer.encode("<|start_of_header|>", add_special_tokens=False)[0]
+            self.tokenizer.encode("<|eot|>", add_special_tokens=False)[0],
+            self.tokenizer.encode("<|header_start|>", add_special_tokens=False)[0]
         ]
         self.stopping_criteria = StoppingCriteriaList([
             StopOnTokens(self.stop_token_ids)
         ])
 
 
-    def generate(self, dataset: Dataset, 
+    def generate(self, 
+                 dataset: Dataset, 
                  max_new_tokens=200, 
                  temprature=0.7,
                  top_k=30,
-                 top_p=0.9):
+                 top_p=0.9,
+                 **kwargs):
         logging.info("Generating completions...")
         results = []
         formatted_prompts = []
         for conv in dataset["conversation"]:
             prompt = formatting_prompts_func(conv[:-1] if len(conv) > 1 else conv)
             formatted_prompts.append(prompt)
-
+        # for example in tqdm.tqdm(dataset, desc="Formatting prompts"):
+        #     formatted_prompts.extend(formatting_prompts_func(example))
+        logging.info(f"Generation Config: max_new_tokens={max_new_tokens}, temperature={temprature}, top_k={top_k}, top_p={top_p}")
         results = self.model(
             formatted_prompts,
             pad_token_id=self.tokenizer.pad_token_id,
@@ -79,6 +99,7 @@ class HuggingFaceWrapper:
             temperature=temprature,
             top_k=top_k,
             top_p=top_p,
+            repetition_penalty=kwargs.get("repetition_penalty", 1.2), # Penalize repetition
             stopping_criteria=self.stopping_criteria)
 
         return results

@@ -261,7 +261,7 @@ class JSONToRTLConverter:
         return ''.join(html_parts)
     
     def escape_html(self, text: str) -> str:
-        """Escape HTML special characters."""
+        """Escape HTML special characters and convert newlines to <br /> tags."""
         if not isinstance(text, str):
             text = str(text)
         
@@ -273,8 +273,12 @@ class JSONToRTLConverter:
             "'": '&#x27;',
         }
         
+        # First escape HTML special characters
         for char, replacement in replacements.items():
             text = text.replace(char, replacement)
+        
+        # Then convert newlines to <br /> tags
+        text = text.replace('\n', '<br />')
         
         return text
     
@@ -402,3 +406,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# python json_to_html

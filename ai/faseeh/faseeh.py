@@ -73,7 +73,9 @@ class FaseehProject:
                 return False
             return True
         if self.dataset is None:
-            self.dataset = pull(self.dataset_name)[split]
+            self.dataset = pull(self.dataset_name)
+            if split is not None:
+                self.dataset = self.dataset[split]
             if shuffle:
                 self.dataset = self.dataset.shuffle(seed=42)
             self._update_status("done")
@@ -269,7 +271,6 @@ class FaseehProject:
         return True
 
     def sft(self,
-            
             pretrained_model_ckpt,
             sft_config,
             tokenizer_id,
@@ -313,10 +314,6 @@ class FaseehProject:
             sample_size = sample_size,
             lora_config = lora_config
         )
-
-        # train
-        if "train" in dataset.column_names:
-            dataset = dataset["train"]
      
         sft_trainer.train(dataset)
 
@@ -334,7 +331,7 @@ class FaseehProject:
         from .generator.hf import HuggingFaceWrapper
         full_path = full_or_augment(file_name,self.root_path)
         logging.info(f"Generating completions using model {model_name}")
-        model = HuggingFaceWrapper(model_name,lora_adapter=lora_adapter)
+        model = HuggingFaceWrapper(model_name,lora_adapter=lora_adapter,tokenizer=self.action_outputs.get(kwargs.get("tokenizer_id"),None))
         completions = model.generate(self.dataset,
                                      max_new_tokens,
                                      temprature,
@@ -344,9 +341,19 @@ class FaseehProject:
         # store completions into jsonl file
         import json
         logging.info(f"Saving completions to {full_path}")
+        results = []
         with open(full_path,"w",encoding="utf-8") as f:
             for index,completion in enumerate(completions):
-                f.write(json.dumps({"index":index,"completion":completion},indent=4,ensure_ascii=False) + "\n")
+                # f.write(json.dumps({"index":index,"completion":completion},indent=4,ensure_ascii=False) + "\n")
+                item = {
+                    "index": index,
+                    "completion": completion[0]["generated_text"],  # Assuming completion is a list of dicts with 'generated_text'
+                    "prompt": self.dataset["conversation"][index][1]["content"],
+                    "ground_truth": self.dataset["conversation"][index][2]["content"]
+                }
+                results.append(item)
+            json.dump(results, f, indent=4, ensure_ascii=False)
+        logging.info(f"Completions saved to {full_path}")
         return True
 
     def generate_pretrained_completion(self,
@@ -489,6 +496,8 @@ class FaseehProject:
             from .rl.rl_ar import FaseehGRPOTrainer
         elif trainer_type == "llama":
             from .rl.rl_llama import FaseehGRPOTrainer
+        elif trainer_type == "poetry":
+            from .rl.rl_poetry import FaseehPoetryGRPOTrainer as FaseehGRPOTrainer
         
         tokenizer = self.action_outputs[tokenizer_id]
         full_output_dir = full_or_augment(output_dir,self.root_path)

@@ -14,7 +14,6 @@ def _raw_text_processing_for_tokenization(examples):
             concatenated_strings.append(text_content.strip())
     return {"text_for_tokenization": concatenated_strings}
 
-
 def tokenize_and_group_texts(examples, tokenizer, block_size):
     # This function processes a batch of raw texts (each representing a volume's content)
     # and groups them into fixed-size token blocks.
