@@ -1,4 +1,3 @@
-
 import tqdm
 import torch
 import logging
@@ -8,7 +7,6 @@ from transformers.generation.stopping_criteria import StoppingCriteria, Stopping
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class StopOnTokens(StoppingCriteria):
-    """Custom stopping criteria for text generation"""
     def __init__(self, stop_token_ids):
         self.stop_token_ids = stop_token_ids
 
@@ -18,19 +16,24 @@ class StopOnTokens(StoppingCriteria):
                 return True
         return False
 
+# def formatting_prompts_func(conv):
+#     #system_prompt = "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+#     system_prompt = conv[0]['content'].strip() if conv and len(conv) > 0 else "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+#     formatted_text = (
+#         "<|begin_of_text|>"
+#         "<|header_start|>system<|header_end|>"
+#         f"{system_prompt}"
+#         "<|eot|>"
+#         "<|header_start|>user<|header_end|>"
+#         f"{conv[1]['content'].strip()}"
+#         "<|eot|>"
+#         "<|header_start|>assistant<|header_end|>"
+#     )
+#     return formatted_text
+
 def formatting_prompts_func(conv):
-    """
-    Format conversations using Llama3 template format.
-    
-    Args:
-        example: Dictionary containing conversation data
-        
-    Returns:
-        List of formatted conversation strings
-    """
-    system_prompt = "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."  # Customize this    
-    
-    # Format each conversation turn using Llama3 template
+    # system_prompt = "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
+    system_prompt = conv[0]['content'].strip() if conv and len(conv) > 0 else "أنت مساعد مفيد ومحترم. تجيب دائماً بشكل مباشر ودقيق."
     formatted_text = (
         "<|begin_of_text|>"
         "<|start_header_id|>system<|end_header_id|>"
@@ -63,34 +66,30 @@ class HuggingFaceWrapper:
         # set padding side to left
         self.model.tokenizer.padding_side = "left"
         self.stop_token_ids = [
-            self.tokenizer.encode("<|eot_id|>", add_special_tokens=False)[0],
-            self.tokenizer.encode("<|start_of_header|>", add_special_tokens=False)[0]
+            self.tokenizer.encode("<|eot|>", add_special_tokens=False)[0],
+            self.tokenizer.encode("<|header_start|>", add_special_tokens=False)[0]
         ]
         self.stopping_criteria = StoppingCriteriaList([
             StopOnTokens(self.stop_token_ids)
         ])
 
 
-    def generate(self, dataset: Dataset, 
+    def generate(self, 
+                 dataset: Dataset, 
                  max_new_tokens=200, 
                  temprature=0.7,
                  top_k=30,
-                 top_p=0.9):
+                 top_p=0.9,
+                 **kwargs):
         logging.info("Generating completions...")
         results = []
-        # # copy the dataset
-        # dataset = dataset.map(lambda x: x)
-        # # remove the last message from each conversation
-        # dataset = dataset.map(lambda x: {"conversation": x["conversation"][:-1]})
-        # # run the pipeline on the dataset
-        # dataset_conversations = dataset["conversation"]
-        # Format all prompts
         formatted_prompts = []
         for conv in dataset["conversation"]:
-            # Format prompt but exclude the last message if it exists
             prompt = formatting_prompts_func(conv[:-1] if len(conv) > 1 else conv)
             formatted_prompts.append(prompt)
-
+        # for example in tqdm.tqdm(dataset, desc="Formatting prompts"):
+        #     formatted_prompts.extend(formatting_prompts_func(example))
+        logging.info(f"Generation Config: max_new_tokens={max_new_tokens}, temperature={temprature}, top_k={top_k}, top_p={top_p}")
         results = self.model(
             formatted_prompts,
             pad_token_id=self.tokenizer.pad_token_id,
@@ -100,6 +99,7 @@ class HuggingFaceWrapper:
             temperature=temprature,
             top_k=top_k,
             top_p=top_p,
+            repetition_penalty=kwargs.get("repetition_penalty", 1.2), # Penalize repetition
             stopping_criteria=self.stopping_criteria)
 
         return results
@@ -108,32 +108,79 @@ class HuggingFacePretrainedCompletionWrapper(HuggingFaceWrapper):
     def __init__(self, model_name: str, tokenizer=None):
         super().__init__(model_name, tokenizer)
         
-    def generate(self, dataset: Dataset,max_new_tokens=200):
-        logging.info("Generating completions...")
-        results = []
-        # get first 100 characters of each dataitem[content]
+    def generate(self, dataset: Dataset, max_new_tokens=200, **kwargs): # Add **kwargs to capture generation params
+        logging.info("Generating completions for pre-trained model...")
+        
+        
+        # shuffle the dataset to ensure diverse prompts
+        dataset = dataset.shuffle(seed=42)  # Shuffle for diversity in prompts
+        
+        full_original_contents = []
         if "content" in dataset.column_names:
-            content = dataset["content"]
-            content = Dataset.from_dict({
-                "content": [c[:100] for c in content]
-            })["content"]
+            full_original_contents = dataset["content"]
         else:
-            content = dataset["prompt"]
+            logging.error("Dataset for HuggingFacePretrainedCompletionWrapper must have a 'content' column.")
+            return []
         
         
-        # get first 100 items
-        content = content[:100]
-    
-        results = self.model(
-            content,
-            max_new_tokens=max_new_tokens,
-            return_full_text=False,
-            batch_size=128)
-        # zip input and output
-        if "completion" in dataset.column_names:
-            # zip with completion
-            results = list(zip(content, [r[0]["generated_text"] for r in results], dataset["completion"]))
-        else:
-            results = list(zip(content, [r[0]["generated_text"] for r in results]))
+
+        # Define the length of the prompt in TOKENS (not characters)
+        prompt_length_tokens = 100 # Default prompt percentage length in tokens
         
-        return results
+        prompts_for_generation = []
+        ground_truths = []
+        
+        # We will iterate through a sample of the dataset (e.g., first 100 items)
+        for original_full_text in full_original_contents:
+            if not original_full_text:
+                continue # Skip empty texts
+
+            # 1. Tokenize the original full text
+            # Ensure add_special_tokens=True/False is appropriate for the context.
+            # For prompts to a base model, usually False to avoid adding BOS mid-text.
+            full_token_ids = self.tokenizer.encode(original_full_text, add_special_tokens=False) 
+            input_token_length = prompt_length_tokens 
+            if len(full_token_ids) < prompt_length_tokens:
+                # take 30% of the full text if it's shorter than the prompt length
+                input_token_length = int(len(full_token_ids) * 0.3)
+            
+            # 2. Slice the token IDs for prompt and ground truth
+            prompt_token_ids = full_token_ids[:input_token_length]
+            ground_truth_token_ids = full_token_ids[input_token_length : input_token_length + max_new_tokens]
+            
+            # 3. Decode token IDs back to strings for output
+            prompt_text = self.tokenizer.decode(prompt_token_ids, skip_special_tokens=True) # Skip special tokens on decode
+            ground_truth_text = self.tokenizer.decode(ground_truth_token_ids, skip_special_tokens=True) # Skip special tokens on decode
+            
+            prompts_for_generation.append(prompt_text)
+            ground_truths.append(ground_truth_text)
+            
+        # Generate completions using the prepared prompts
+        if not prompts_for_generation:
+            logging.warning("No valid prompts generated for text generation.")
+            return []
+
+        # --- FIX: Pass crucial generation parameters to the pipeline call ---
+        generation_params = {
+            "max_new_tokens": max_new_tokens,
+            "do_sample": kwargs.get("do_sample", True), # Enable sampling
+            "temperature": kwargs.get("temperature", 0.7), # Default if not provided
+            "top_k": kwargs.get("top_k", 50), # Default if not provided
+            "top_p": kwargs.get("top_p", 0.95), # Default if not provided
+            "no_repeat_ngram_size": kwargs.get("no_repeat_ngram_size", 3), # Prevent repeating 3-token n-grams
+            "repetition_penalty": kwargs.get("repetition_penalty", 1.2), # Penalize repetition
+            "return_full_text": False, # Ensure only generated part is returned
+            "batch_size": 128 # Can be passed to pipeline for inference batching
+        }
+
+        generated_results = self.model(
+            prompts_for_generation,
+            **generation_params # Pass all the collected generation parameters
+        )
+        # --- END FIX ---
+        
+        completions = [r[0]["generated_text"] for r in generated_results]
+        
+        results_with_gt = list(zip(prompts_for_generation, completions, ground_truths))
+        
+        return results_with_gt

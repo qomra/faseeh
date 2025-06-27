@@ -6,7 +6,11 @@ from peft import PeftModel, PeftConfig
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Run end-to-end Arabic root lookup using multiple LoRA models')
+<<<<<<< HEAD
     parser.add_argument('--model_name', type=str, default='meta-llama/Llama-3.2-8B-Instruct',
+=======
+    parser.add_argument('--model_name', type=str, default='/home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/meta-llama/Llama-3.1-8B-Instruct/',
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
                         help='Base model to use')
     parser.add_argument('--root_analyzer_path', type=str, default='models/rooter',
                         help='Path to the root analyzer LoRA model')
@@ -128,10 +132,17 @@ def run_memorizer(question, analysis, model, tokenizer, max_length=4096):
 
 def generate_answer(question, analysis, lisan_content, model, tokenizer, max_length=4096):
     """Generate a final answer using the base model without LoRA adapters"""
+<<<<<<< HEAD
     system_prompt = "أنت خبير في علم اللغة العربية متخصص في تفسير معاني الكلمات العربية."
     
     # Create a prompt that includes the analysis and Lisan Al-Arab content
     prompt = f"<|start_header_id|>system<|end_header_id|>{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>{question}<|eot_id|><|start_header_id|>assistant<|end_header_id|><analyze>\n{analysis}\n</analyze>\n\n<lisan alarab>\n{lisan_content}\n</lisan alarab>\n\n<answer>\n"
+=======
+    system_prompt = "أنت خبير في علم اللغة العربية متخصص في تفسير معاني الكلمات العربية. أجب على السؤال باستخدام السياق المقدم لك"
+    
+    # Create a prompt that includes the analysis and Lisan Al-Arab content
+    prompt = f"<|start_header_id|>system<|end_header_id|>{system_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>السياق: {lisan_content}\ns\nالسؤال: {question}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
     
     inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
     
@@ -153,12 +164,16 @@ def generate_answer(question, analysis, lisan_content, model, tokenizer, max_len
     response = tokenizer.decode(outputs[0][prompt_length:], skip_special_tokens=True)
     
     # Extract until </answer> if present
+<<<<<<< HEAD
     answer = ""
     if "</answer>" in response:
         end_idx = response.find("</answer>")
         answer = response[:end_idx].strip()
     else:
         answer = response.strip()
+=======
+    answer = response.strip()
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
     
     return answer
 

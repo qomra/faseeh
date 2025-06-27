@@ -172,6 +172,8 @@ def get_instruction_template(tokenizer):
     
     return instruction_template
 
+
+
 def get_response_template(tokenizer):
     """
     Get the response template tokens for the data collator

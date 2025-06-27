@@ -1,1 +1,1 @@
-from .tokenizer import FaseehTokenizer
+from .tokenizer import FaseehTokenizer,FaseehTokenizer4

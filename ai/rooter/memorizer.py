@@ -36,19 +36,31 @@ def parse_args():
                         help='Mode to run the script (train or inference)')
     parser.add_argument('--model_name', type=str, default='/home/jalalirs/Documents/code/arabi/maknaz/maknaz_/model/meta-llama/Llama-3.1-8B-Instruct/',
                         help='Base model to use')
+<<<<<<< HEAD
     parser.add_argument('--dataset_path', type=str, default='memorization_dataset.json',
+=======
+    parser.add_argument('--dataset_path', type=str, default='memorization_dataset_short.json',
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
                         help='Path to the training dataset JSON file')
     parser.add_argument('--output_dir', type=str, default='models/memorizer',
                         help='Directory to save the model')
     parser.add_argument('--train_batch_size', type=int, default=1, help='Training batch size')
     parser.add_argument('--gradient_accumulation_steps', type=int, default=8,
                         help='Number of updates steps to accumulate before performing a backward/update pass')
+<<<<<<< HEAD
     parser.add_argument('--epochs', type=int, default=3, help='Number of training epochs')
+=======
+    parser.add_argument('--epochs', type=int, default=10, help='Number of training epochs')
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
     parser.add_argument('--learning_rate', type=float, default=2e-4, help='Learning rate')
     parser.add_argument('--lora_r', type=int, default=32, help='LoRA rank')
     parser.add_argument('--lora_alpha', type=int, default=64, help='LoRA alpha')
     parser.add_argument('--lora_dropout', type=float, default=0.05, help='LoRA dropout')
+<<<<<<< HEAD
     parser.add_argument('--max_seq_length', type=int, default=8000, help='Maximum sequence length')
+=======
+    parser.add_argument('--max_seq_length', type=int, default=4096, help='Maximum sequence length')
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
     parser.add_argument('--use_flash_attn', action='store_true', help='Use Flash Attention if available')
     return parser.parse_args()
 
@@ -233,11 +245,19 @@ def train_model(args):
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         evaluation_strategy="steps",
+<<<<<<< HEAD
         eval_steps=100,  # Less frequent evaluation to speed up training
         logging_strategy="steps",
         logging_steps=20,
         save_strategy="steps",
         save_steps=100,  # Less frequent saving to reduce I/O overhead
+=======
+        eval_steps=5,  # Less frequent evaluation to speed up training
+        logging_strategy="steps",
+        logging_steps=5,
+        save_strategy="steps",
+        save_steps=5,  # Less frequent saving to reduce I/O overhead
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
         learning_rate=args.learning_rate,
         per_device_train_batch_size=args.train_batch_size,
         per_device_eval_batch_size=args.train_batch_size * 2,
@@ -318,11 +338,37 @@ def run_inference(args):
         generated_text = ""
         
         with torch.no_grad():
+<<<<<<< HEAD
             for new_tokens in model.generate(
+=======
+            # for new_tokens in model.generate(
+            #     input_ids=input_ids,
+            #     max_new_tokens=1024,
+            #     temperature=0.7,
+            #     top_p=0.9,
+            #     repetition_penalty=1.1,
+            #     do_sample=True,
+            #     pad_token_id=tokenizer.eos_token_id,
+            #     streaming=True,
+            # ):
+            #     # Get the new token
+            #     token = new_tokens[0, -1].unsqueeze(0)
+                
+            #     # Convert token to text and print
+            #     new_text = tokenizer.decode(token)
+            #     generated_text += new_text
+            #     print(new_text, end="", flush=True)
+                
+            #     # Check if we've reached the end tag
+            #     if "</lisan alarab>" in generated_text:
+            #         break
+            outputs = model.generate(
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
                 input_ids=input_ids,
                 max_new_tokens=1024,
                 temperature=0.7,
                 top_p=0.9,
+<<<<<<< HEAD
                 repetition_penalty=1.1,
                 do_sample=True,
                 pad_token_id=tokenizer.eos_token_id,
@@ -339,6 +385,15 @@ def run_inference(args):
                 # Check if we've reached the end tag
                 if "</lisan alarab>" in generated_text:
                     break
+=======
+                top_k=50,
+                repetition_penalty=1.1,
+                do_sample=True,
+                pad_token_id=tokenizer.eos_token_id
+            )
+            generated_text = tokenizer.decode(outputs[0][input_ids.shape[1]:])
+            print(generated_text)
+>>>>>>> 12f36a274bf141e6426259d93b106b0cab363fb3
         
         print("\n\nGeneration completed.\n")
 
