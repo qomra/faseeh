@@ -1,0 +1,2 @@
+model_name,tokenizer_class,vocab_size,total_tokens,total_words,fertility_score,preserves_tashkeel,tashkeel_preservation_rate,tokens_per_second,dataset
+Mysam/Oryx-2.0,LlamaTokenizerFast,32000,1513854,769886,1.9663352756122334,✅,1.0,293335.1698892711,./datasets/SaiedAlshahrani/Moroccan_Arabic_Wikipedia_20230101_nobots
