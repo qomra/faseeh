@@ -4,7 +4,6 @@ import threading
 import socket
 import signal
 import requests
-import regex as re
 import re
 import pyarabic.araby as araby
 import os
@@ -20,12 +19,11 @@ from trl import GRPOTrainer, GRPOConfig
 from transformers import AutoModelForCausalLM
 from requests.adapters import HTTPAdapter
 from peft import LoraConfig, get_peft_model, AutoPeftModelForCausalLM
-from peft import LoraConfig
 from peft import get_peft_model
 from Levenshtein import distance as lev
 from contextlib import contextmanager
 
-# This script direcory
+# This script directory
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # rhyme2words cache file
 RHYME_FILE = os.path.join(SCRIPT_DIR, "rhyme2words.json")
@@ -256,7 +254,7 @@ def batch_score_poems_with_weighted_qafiya_robust(poems_batch, targets_batch):
                         maana * 0.10 +     # 10% weight for meaning
                         iltizam * 0.05     # 5% weight for compliance
                     )
-                    
+                    score = np.clip(score, 0.0, 1.0)
                     weighted_scores.append(weighted_score)
                     
                     # Store detailed breakdown for logging
@@ -497,10 +495,6 @@ def _load_rhyme_index() -> Dict[str, List[str]]:
     logging.info("✅ loaded %d rhyme groups", len(RHYME_INDEX))
     return RHYME_INDEX
 
-def _strip_diacritics(text: str) -> str:
-    """Loose, fast Arabic tashkeel/haraka stripping (no external dep)."""
-    return re.sub(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]", "", text)
-
 def _extract_target_rhyme(target: str) -> str:
     """
     Detect the rhyme of the reference poem:
@@ -510,7 +504,7 @@ def _extract_target_rhyme(target: str) -> str:
         else fall back to the longest suffix shared by 1st & 2nd line,
         else the final character of line-1.
     """
-    lines = [l.strip() for l in _strip_diacritics(target).split("\n") if l.strip()]
+    lines = [l.strip() for l in araby.strip_diacritics(target).split("\n") if l.strip()]
     if len(lines) == 0:
         return ""                       # should never happen
     if len(lines) == 1:
@@ -533,16 +527,25 @@ def _extract_target_rhyme(target: str) -> str:
 
     return lines[0][-1]
 
-def rhyme_dictionary_reward(
-    prompts, completions, poem, **kwargs
-) -> list[float]:
+def rhyme_dictionary_reward(prompts, completions, poem, **kwargs) -> list[float]:
     """
-    + detects the correct rhyme from *poem*         (ground truth)
-    + checks that ***every*** generated line ends with that rhyme
-    + checks that the last word of each line occurs in our lexicon
-    Returns a scalar in [0, 1] for each sample.
+    Reward ∈ [0,1] for each sample.
+
+    + every line must end with the reference rhyme
+    + last-word must be in our rhyme lexicon
+    + endings should be consistent across lines
+    – penalise re-using *exactly* the same last word
+
+    Tunables
+    --------
+    w_rhyme, w_lex, w_cons : weights that sum to 1.0
+    alpha_rep              : strength of repetition penalty  (0‥1)
     """
     rhyme_index = _load_rhyme_index()
+
+    w_rhyme, w_lex, w_cons = 0.45, 0.35, 0.20    # positive weights
+    alpha_rep              = 0.50                # repetition penalty
+
     rewards: list[float] = []
 
     for comp, reference in zip(completions, poem):
@@ -551,58 +554,51 @@ def rhyme_dictionary_reward(
             rewards.append(0.0)
             continue
 
-        # ------------------------------------------------------------------ #
-        # Pre-processing
-        lines = [
-            l.strip() for l in _strip_diacritics(gen_text).split("\n") if l.strip()
-        ]
-        if len(lines) < 2:               # need at least a couplet
+        # ---- pre-processing -------------------------------------------------
+        lines = [l.strip() for l in araby.strip_diacritics(gen_text).split("\n") if l.strip()]
+        if len(lines) < 2:
             rewards.append(0.0)
             continue
 
         target_rhyme = _extract_target_rhyme(reference)
-        rhyme_len    = len(target_rhyme) if target_rhyme else 1
+        rhyme_len    = max(1, len(target_rhyme))
 
-        # ------------------------------------------------------------------ #
-        # Per-line checks
-        total          = len(lines)
-        rhyme_hits     = 0               # line ends with correct rhyme
-        lexicon_hits   = 0               # last word ∈ allowed list
-        endings        = []              # for self-consistency calc
+        total         = len(lines)
+        rhyme_hits    = 0
+        lexicon_hits  = 0
+        endings       = []
+        last_words    = []
 
         for line in lines:
             words = line.split()
             if not words:
                 continue
             last_word = words[-1]
+            last_words.append(last_word)
 
             endings.append(last_word[-rhyme_len:])
 
-            # 1) rhyme correctness
             if last_word.endswith(target_rhyme):
                 rhyme_hits += 1
 
-            # 2) word in lexicon
             if target_rhyme in rhyme_index and last_word in rhyme_index[target_rhyme]:
                 lexicon_hits += 1
 
-        # 3) rhyme consistency across the whole poem
-        most_common = max(set(endings), key=endings.count)
-        consistency = endings.count(most_common) / total
-
-        # ------------------------------------------------------------------ #
-        # Merge into a single reward  (all weights sum to 1.0)
-        w_rhyme       = 0.45         # uses correct ending
-        w_lexicon     = 0.40         # uses valid vocab
-        w_consistency = 0.15         # same ending everywhere
-
-        score = (
-            w_rhyme       * (rhyme_hits     / total) +
-            w_lexicon     * (lexicon_hits   / total) +
-            w_consistency * consistency
+        # ---- positive score -------------------------------------------------
+        consistency   = endings.count(max(set(endings), key=endings.count)) / total
+        positive_part = (
+            w_rhyme * (rhyme_hits   / total) +
+            w_lex   * (lexicon_hits / total) +
+            w_cons  * consistency
         )
 
-        rewards.append(round(float(score), 4))
+        # ---- repetition penalty --------------------------------------------
+        repeats        = total - len(set(last_words))
+        repeat_ratio   = repeats / max(1, total - 1)      # 0 = unique, 1 = all identical
+        penalty_factor = 1.0 - alpha_rep * repeat_ratio   # multiplicative  ∈ [1-α, 1]
+
+        score = positive_part * penalty_factor            # already bounded 0‥1
+        rewards.append(float(score))
 
     return rewards
 
@@ -912,7 +908,7 @@ class FaseehPoetryGRPOTrainer:
         from trl import GRPOConfig
         self.training_args = GRPOConfig(
             output_dir=output_dir,
-            num_train_epochs=1,
+            num_train_epochs=2,
             per_device_train_batch_size=8,      # AGGRESSIVE: Even higher batch size
             gradient_accumulation_steps=2,      # REDUCED: Still effective batch of 16
             optim="adamw_torch",
@@ -929,7 +925,7 @@ class FaseehPoetryGRPOTrainer:
             max_completion_length=400,       # REDUCED: Shorter completions
             temperature=0.6,                 # INCREASED: Higher temperature for stability
             max_prompt_length=400,           # REDUCED: Shorter prompts
-            num_generations=Z,               # REDUCED: Fewer generations per step
+            num_generations=16,               # REDUCED: Fewer generations per step
             remove_unused_columns=False,
             max_grad_norm=0.5,               # REDUCED: More aggressive gradient clipping
             dataloader_pin_memory=False,
@@ -1005,9 +1001,8 @@ class FaseehPoetryGRPOTrainer:
         ######################################################################
         PHASE_A_STEPS = 150         # warm-up on rhyme only
         WEIGHTS = {
-            #          rhyme  struct  explicit
-            "A":   (1.0,   0.0,    0.0),
-            "B":   (0.6,   0.25,   0.15),
+            "A": (1.0, 0.0, 0.0),      # rhyme, struct, explicit
+            "B": (0.6, 0.25, 0.15),
         }
 
         def zscore(x, eps=1e-8, clip=3.0):
@@ -1020,40 +1015,57 @@ class FaseehPoetryGRPOTrainer:
         ######################################################################
         # 2.  wrapped reward
         ######################################################################
-        self.global_step = 0
 
-        def combined_reward(prompts, comps, targets, **kw):
-            """Phase-aware combination of local rewards."""
-            self.global_step += 1
-            phase = "A" if self.global_step < PHASE_A_STEPS else "B"
-            w_rhyme, w_struct, w_exp = WEIGHTS[phase]
-
-            rhyme_raw   = rhyme_dictionary_reward(prompts, comps, targets)
-            rhyme_z     = zscore(rhyme_raw)
-
-            # light extras only after warm-up
-            if phase == "A":
-                struct_z = exp_z = [0.0]*len(rhyme_raw)
+        def combined_reward(*args, **kw):
+            """
+            Works with:  
+            • older TRL (positional)  
+            • newer TRL (mixed positional)  
+            • newest TRL (kwargs only)
+            """
+            # ── 1) locate the three pieces we need ────────────────────────────────
+            if len(args) == 3:                                # (prompts, completions, poem)
+                prompts, completions, poem = args
+            elif len(args) >= 5:                              # (comps, targets, prompts, completions, poem …)
+                _, _, prompts, completions, poem = args[:5]
+            elif {"prompts", "completions", "poem"} <= kw.keys():   # all via kwargs
+                prompts      = kw["prompts"]
+                completions  = kw["completions"]
+                poem         = kw["poem"]
             else:
-                struct_z = zscore(structure_reward_func(prompts, comps, targets))
-                exp_z    = zscore(enhanced_explicit_poetry_reward_func(
-                                    prompts, comps, targets))
+                raise ValueError(
+                    f"combined_reward: could not parse call — "
+                    f"args={len(args)}, present kw={list(kw.keys())}"
+                )
 
-            # linear mix
+            # ── 2) curriculum logic (unchanged) ──────────────────────────────────
+            global step_counter
+            step_counter += 1
+            phase   = "A" if step_counter < PHASE_A_STEPS else "B"
+            w_rhyme, w_struct, w_expl = WEIGHTS[phase]
+
+            rhyme_raw = rhyme_dictionary_reward(prompts, completions, poem)
+            rhyme     = zscore(rhyme_raw)
+
+            if phase == "A":
+                struct = expl = [0.0] * len(rhyme)
+            else:
+                struct_raw = structure_reward_func(prompts, completions, poem)
+                expl_raw   = enhanced_explicit_poetry_reward_func(prompts, completions, poem)
+                struct, expl = map(zscore, (struct_raw, expl_raw))
+
             rewards = [
-                w_rhyme  * r +
-                w_struct * s +
-                w_exp    * e
-                for r, s, e in zip(rhyme_z, struct_z, exp_z)
+                w_rhyme*r + w_struct*s + w_expl*e
+                for r, s, e in zip(rhyme, struct, expl)
             ]
 
-            if self.global_step % 20 == 0:
+            if step_counter % 20 == 0:
                 logging.info(
-                    f"step={self.global_step:4d}│{phase}"
-                    f"│μ(rhyme_raw)={np.mean(rhyme_raw):.3f}"
-                    f"│μ(total)={np.mean(rewards):.3f}"
+                    f"step={step_counter:>5} | phase={phase} "
+                    f"| μ_raw_rhyme={np.mean(rhyme_raw):.3f} | μ_total={np.mean(rewards):.3f}"
                 )
             return rewards
+
         ######################################################################
         # 3.  create trainer and launch
         ######################################################################

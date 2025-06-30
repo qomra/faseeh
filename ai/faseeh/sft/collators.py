@@ -34,12 +34,12 @@ def formatting_prompts_func(example: Dict[str, Any]) -> List[str]:
 
 def get_template_func(tokenizer):
     """Get the instruction template tokens for the data collator."""
-    instruction_template = "<|header_start|>user<|header_end|>"
+    instruction_template = "<|start_header_id|>user<|end_header_id|>"
     return tokenizer.encode(instruction_template, add_special_tokens=False)
 
 def get_response_template_func(tokenizer):
     """Get the response template tokens for the data collator."""
-    response_template = "<|eot|><|header_start|>assistant<|header_end|>"
+    response_template = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>"
     return tokenizer.encode(response_template, add_special_tokens=False)
 
 class FaseehDataCollatorForCompletionOnlyLM(DataCollatorForLanguageModeling):
