@@ -336,7 +336,8 @@ class FaseehProject:
                                      max_new_tokens,
                                      temprature,
                                      top_k,
-                                     top_p)
+                                     top_p,
+                                     **kwargs)
 
         # store completions into jsonl file
         import json
