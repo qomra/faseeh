@@ -80,10 +80,17 @@ class HuggingFaceWrapper:
                  temprature=0.7,
                  top_k=30,
                  top_p=0.9,
+                 sample_size=-1, # Default to -1 for no sampling
                  **kwargs):
         logging.info("Generating completions...")
         results = []
         formatted_prompts = []
+        if sample_size > 0:
+            # Sample a subset of the dataset if sample_size is specified
+            dataset = dataset.shuffle(seed=42).select(range(sample_size))
+            logging.info(f"Sampling {sample_size} examples from the dataset.")
+        else:
+            logging.info("Using the entire dataset for generation.")
         for conv in dataset["conversation"]:
             prompt = formatting_prompts_func(conv[:-1] if len(conv) > 1 else conv)
             formatted_prompts.append(prompt)
