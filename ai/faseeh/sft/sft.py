@@ -234,15 +234,15 @@ class FaseehSFTTrainer:
 
         # Add this after your data collator setup and before creating SFTTrainer:
         train_dataset = preprocess_dataset(train_dataset, self.tokenizer, format_template_func)
-        eval_dataset = self._prepare_validation_dataset(dataset, format_template_func)
+        eval_dataset = None #self._prepare_validation_dataset(dataset, format_template_func)
 
         callbacks = []
         if eval_dataset:
-            early_stopping = EarlyStoppingCallback(
-                early_stopping_patience=3,
-                early_stopping_threshold=0.01
-            )
-            callbacks.append(early_stopping)
+            # early_stopping = EarlyStoppingCallback(
+            #     early_stopping_patience=3,
+            #     early_stopping_threshold=0.01
+            # )
+            # callbacks.append(early_stopping)
             logging.info("Early stopping enabled with validation dataset")
         else:
             # No eval dataset, so disable evaluation
